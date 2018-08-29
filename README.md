@@ -1,8 +1,16 @@
 # CSC 501 (601) - Operating Systems Principles
-This repo contains 3 (three) separate projects including source code for the CSC 501 OS class curriculum. The information of the class as follows:
-* Fall of the 2018
+## Objective
+The repository contains source code for 3 (three) separate projects designed and formulated by the CSC 501 Operating Systems class curriculum. 
+
+The information of the class:
+* Fall of the 2018 at [NCSU](https://www.ncsu.edu/)
 * Professor: Dr. Hung-Wei Tseng
-* Team of 2 contributers: Nikolay G Titov and Nathan Schnoor
+* Distance Edication section
+
+The information of the team:
+* Team of 2 contributers
+   * **Nikolay G Titov** (ngtitov@ncsu.edu) - Software Engineer
+   * **Nathan Schnoor** (nfschnoo@ncsu.edu) - Software Engineer
 
 ## Project 1: TBD
 
