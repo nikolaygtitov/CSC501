@@ -47,6 +47,8 @@
 #include <linux/list.h>
 #include <linux/mutex.h>
 
+#define DEBUG(format, ...) printk("[%s]: " format, __func__, __VA_ARGS__)
+
 struct container {
     __u64 cid;
     struct list_head list;
@@ -54,7 +56,7 @@ struct container {
 };
 
 struct task {
-    __u64 pid;
+    pid_t pid;
     struct list_head list;
 };
 
@@ -80,6 +82,58 @@ static struct container * get_container(__u64 cid)
 }
 
 /**
+ * Create a new container.
+ */
+static struct container * create_container(__u64 cid)
+{
+    struct container *container = NULL;
+
+    /* Allocate container */
+    container = (struct container *) kcalloc(1, sizeof(struct container), GFP_KERNEL);
+    if (!container) {
+        return NULL;
+    }
+
+    /* Initialize container list head */
+    INIT_LIST_HEAD(&container->list);
+
+    /* Initialize task list head */
+    INIT_LIST_HEAD(&container->task_list);
+
+    /* Add container to list */
+    list_add_tail(&container->list, &container_list);
+
+    DEBUG("Created container %d\n", (unsigned) cid);
+
+    return container;
+}
+
+/**
+ * Create task.
+ */
+static struct task * create_task(struct container *container, struct task_struct *thread)
+{
+    struct task *task = NULL;
+
+    /* Allocate task */
+    task = (struct task *) kcalloc(1, sizeof(struct task), GFP_KERNEL);
+    if (!task) {
+        return NULL;
+    }
+
+    /* Set task fields */
+    task->pid = thread->pid;
+
+    /* Initialize task list head */
+    INIT_LIST_HEAD(&task->list);
+
+    /* Add to container task list */
+    list_add_tail(&task->list, &container->task_list);
+
+    return task;
+}
+
+/**
  * Delete the task in the container.
  * 
  * external functions needed:
@@ -100,13 +154,23 @@ int processor_container_delete(struct processor_container_cmd __user *user_cmd)
  */
 int processor_container_create(struct processor_container_cmd __user *user_cmd)
 {
-    mutex_lock(&lock);
-    /* Find container with given cid */
     struct container *container = NULL;
+    mutex_lock(&lock);
+
+    /* Find container with given cid */
     container = get_container(user_cmd->cid);
     if (!container) {
         /* Could not find container in list - create it */
+        container = create_container(user_cmd->cid);
+        if (!container) {
+            printk(KERN_ERR "Unable to create container\n");
+            return -1;
+        }
     }
+
+    /* Create task */
+    (void) create_task(container, current);
+
     mutex_unlock(&lock);
     return 0;
 }
