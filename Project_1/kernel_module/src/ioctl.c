@@ -47,7 +47,7 @@
 #include <linux/list.h>
 #include <linux/mutex.h>
 
-#define DEBUG(format, ...) printk("[%s]: " format, __func__, __VA_ARGS__)
+#define DEBUG(format, ...) printk(KERN_ERR "[%s]: " format, __func__, __VA_ARGS__)
 
 struct container {
     __u64 cid;
