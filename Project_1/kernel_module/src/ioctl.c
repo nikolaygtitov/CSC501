@@ -55,10 +55,10 @@ struct container {
 
 struct task {
     __u64 pid;
-    strcut list_head *list;
+    struct list_head *list;
 };
 
-extern struct mutex *lock;
+struct mutex *lock;
 
 struct list_head *container_list;
 /**

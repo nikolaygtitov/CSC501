@@ -45,6 +45,7 @@
 #include <linux/sched.h>
 
 extern struct miscdevice processor_container_dev;
+extern struct mutex *lock;
 
 /**
  * Initialize and register the kernel module
@@ -55,7 +56,7 @@ int processor_container_init(void)
     if ((ret = misc_register(&processor_container_dev)))
         printk(KERN_ERR "Unable to register \"processor_container\" misc device\n");
     else {
-        mutext_init(lock);
+        mutex_init(lock);
         printk(KERN_ERR "\"processor_container\" misc device installed\n");
     }
     return ret;
