@@ -54,8 +54,10 @@ int processor_container_init(void)
     int ret;
     if ((ret = misc_register(&processor_container_dev)))
         printk(KERN_ERR "Unable to register \"processor_container\" misc device\n");
-    else
+    else {
+        mutext_init(lock);
         printk(KERN_ERR "\"processor_container\" misc device installed\n");
+    }
     return ret;
 }
 

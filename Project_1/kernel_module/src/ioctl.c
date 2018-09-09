@@ -44,7 +44,23 @@
 #include <linux/mutex.h>
 #include <linux/sched.h>
 #include <linux/kthread.h>
+#include <linux/list.h>
+#include <linux/mutex.h>
 
+struct container {
+    __u64 cid;
+    struct list_head *list;
+    struct list_head *task_list;
+};
+
+struct task {
+    __u64 pid;
+    strcut list_head *list;
+};
+
+extern struct mutex *lock;
+
+struct list_head *container_list;
 /**
  * Delete the task in the container.
  * 
