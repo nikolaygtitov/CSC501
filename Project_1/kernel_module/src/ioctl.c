@@ -49,19 +49,51 @@
 
 struct container {
     __u64 cid;
-    struct list_head *list;
-    struct list_head *task_list;
+    struct list_head list;
+    struct list_head task_list;
 };
 
 struct task {
     __u64 pid;
-    struct list_head *list;
+    struct list_head list;
 };
 
 struct mutex lock;
 
-struct list_head *container_list;
+struct list_head container_list;
 
+/**
+ * Get the container with the given cid.
+ * If the container does not exist, NULL is returned.
+ */
+static struct container * get_container(__u64 cid)
+{
+    struct list_head *list_itr = NULL;
+    struct container *container = NULL;
+    list_for_each(list_itr, &container_list) {
+        container = (struct container *) list_entry(list_itr, struct container, list);
+        if (container->cid == cid) {
+            return container;
+        }
+    }
+    return NULL;
+}
+
+/**
+ * Get the task within the given container and pid of the process.
+ * If the task does not exist, NULL is returned.
+ */
+static struct task * get_task(struct container *container, __u64 pid) {
+    struct list_head *list_itr = NULL;
+    struct task *task = NULL;
+    list_for_each(list_itr, &container->task_list) {
+        task = (struct task *) list_entry(list_itr, struct task, list);
+        if (task->pid == pid) {
+            return task;
+        }
+    }
+    return NULL;
+}
 
 /**
  * Delete the task in the container.
@@ -71,20 +103,31 @@ struct list_head *container_list;
  */
 int processor_container_delete(struct processor_container_cmd __user *user_cmd)
 {
-    mutex_lock(lock);
-    container = get_container(user_cmd);
-    if (container == NULL) {
-        printk(KERN_ERR "No such CID: %d is found in the container list \n",
-                user_cmd->cid);
-        return 0;
+    mutex_lock(&lock);
+    /* Find container with given cid */
+    struct container *container = NULL;
+    container = get_container(user_cmd->cid);
+    if (!container) {
+        printk(KERN_ERR "No such CID: %d is found in the container list \n", user_cmd->cid);
+        mutex_unlock(&lock);
+        return EINVAL;
     }
     
-    
-    if (task_list == NULL) {
-        list_del(container)
+    /* Find a task within a given container based on current task_struct*/
+    struct task *task = NULL;
+    task = get_task(container, current->pid);
+    if (!task) {
+        printk(KERN_ERR "No such task with PID: %d is found in the container with CID: %d\n", current->pid, container.cid);
+        mutex_unlock(&lock);
+        return EINVAL;
+    }
+    list_del(&task->list);
+    free(task);
+    if (list_empty(&container->task_list)) {
+        list_del(&container->list)
         free(container);
     }
-    mutex_unlock(lock);
+    mutex_unlock(&lock);
     return 0;
 }
 
@@ -98,9 +141,14 @@ int processor_container_delete(struct processor_container_cmd __user *user_cmd)
  */
 int processor_container_create(struct processor_container_cmd __user *user_cmd)
 {
-    mutex_lock(lock);
-
-    mutex_unlock(lock);
+    mutex_lock(&lock);
+    /* Find container with given cid */
+    struct container *container = NULL;
+    container = get_container(user_cmd->cid);
+    if (!container) {
+        /* Could not find container in list - create it */
+    }
+    mutex_unlock(&lock);
     return 0;
 }
 
