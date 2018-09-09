@@ -47,7 +47,7 @@
 #include <linux/list.h>
 #include <linux/mutex.h>
 
-#define DEBUG(format, ...) printk(KERN_ERR "[%s]: " format, __func__, __VA_ARGS__)
+#define DEBUG(format, ...) printk(KERN_DEBUG "[csc501:%s:%d]: " format, __func__, __LINE__, __VA_ARGS__)
 
 struct container {
     __u64 cid;
@@ -129,6 +129,8 @@ static struct task * create_task(struct container *container, struct task_struct
 
     /* Add to container task list */
     list_add_tail(&task->list, &container->task_list);
+
+    DEBUG("Added task %d\n", (unsigned) task->pid);
 
     return task;
 }
