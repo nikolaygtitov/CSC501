@@ -164,6 +164,7 @@ int processor_container_create(struct processor_container_cmd __user *user_cmd)
         container = create_container(user_cmd->cid);
         if (!container) {
             printk(KERN_ERR "Unable to create container\n");
+            mutex_unlock(&lock);
             return -1;
         }
     }
