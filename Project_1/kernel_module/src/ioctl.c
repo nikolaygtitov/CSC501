@@ -49,18 +49,36 @@
 
 struct container {
     __u64 cid;
-    struct list_head *list;
-    struct list_head *task_list;
+    struct list_head list;
+    struct list_head task_list;
 };
 
 struct task {
     __u64 pid;
-    struct list_head *list;
+    struct list_head list;
 };
 
 struct mutex lock;
 
-struct list_head *container_list;
+struct list_head container_list;
+
+/**
+ * Get the container with the given cid.
+ * If the container does not exist, NULL is returned.
+ */
+static struct container * get_container(__u64 cid)
+{
+    struct list_head *list_itr = NULL;
+    struct container *container = NULL;
+    list_for_each(list_itr, &container_list) {
+        container = (struct container *) list_entry(list_itr, struct container, list);
+        if (container->cid == cid) {
+            return container;
+        }
+    }
+    return NULL;
+}
+
 /**
  * Delete the task in the container.
  * 
@@ -82,9 +100,14 @@ int processor_container_delete(struct processor_container_cmd __user *user_cmd)
  */
 int processor_container_create(struct processor_container_cmd __user *user_cmd)
 {
-    mutex_lock(lock);
-
-    mutex_unlock(lock);
+    mutex_lock(&lock);
+    /* Find container with given cid */
+    struct container *container = NULL;
+    container = get_container(user_cmd->cid);
+    if (!container) {
+        /* Could not find container in list - create it */
+    }
+    mutex_unlock(&lock);
     return 0;
 }
 
