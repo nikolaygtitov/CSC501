@@ -85,7 +85,8 @@ static struct container * get_container(__u64 cid)
  * Get the task within the given container and pid of the process.
  * If the task does not exist, NULL is returned.
  */
-static struct task * get_task(struct container *container, __u64 pid) {
+static struct task * get_task(struct container *container, __u64 pid)
+{
     struct list_head *list_itr = NULL;
     struct task *task = NULL;
     list_for_each(list_itr, &container->task_list) {
