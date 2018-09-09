@@ -47,6 +47,8 @@
 #include <linux/list.h>
 #include <linux/mutex.h>
 
+#define DEBUG(format, ...) printk(KERN_DEBUG "[csc501:%s:%d]: " format, __func__, __LINE__, __VA_ARGS__)
+
 struct container {
     __u64 cid;
     struct list_head list;
@@ -54,7 +56,7 @@ struct container {
 };
 
 struct task {
-    __u64 pid;
+    pid_t pid;
     struct list_head list;
 };
 
@@ -96,6 +98,60 @@ static struct task * get_task(struct container *container, __u64 pid) {
 }
 
 /**
+ * Create a new container.
+ */
+static struct container * create_container(__u64 cid)
+{
+    struct container *container = NULL;
+
+    /* Allocate container */
+    container = (struct container *) kcalloc(1, sizeof(struct container), GFP_KERNEL);
+    if (!container) {
+        return NULL;
+    }
+
+    /* Initialize container list head */
+    INIT_LIST_HEAD(&container->list);
+
+    /* Initialize task list head */
+    INIT_LIST_HEAD(&container->task_list);
+
+    /* Add container to list */
+    list_add_tail(&container->list, &container_list);
+
+    DEBUG("Created container %d\n", (unsigned) cid);
+
+    return container;
+}
+
+/**
+ * Create task.
+ */
+static struct task * create_task(struct container *container, struct task_struct *thread)
+{
+    struct task *task = NULL;
+
+    /* Allocate task */
+    task = (struct task *) kcalloc(1, sizeof(struct task), GFP_KERNEL);
+    if (!task) {
+        return NULL;
+    }
+
+    /* Set task fields */
+    task->pid = thread->pid;
+
+    /* Initialize task list head */
+    INIT_LIST_HEAD(&task->list);
+
+    /* Add to container task list */
+    list_add_tail(&task->list, &container->task_list);
+
+    DEBUG("Added task %d\n", (unsigned) task->pid);
+
+    return task;
+}
+
+/**
  * Delete the task in the container.
  * 
  * external functions needed:
@@ -108,21 +164,25 @@ int processor_container_delete(struct processor_container_cmd __user *user_cmd)
     struct container *container = NULL;
     container = get_container(user_cmd->cid);
     if (!container) {
-        printk(KERN_ERR "No such CID: %d is found in the container list \n", user_cmd->cid);
+        printk(KERN_ERR "No such CID: %d is found in the container list.\n", user_cmd->cid);
         mutex_unlock(&lock);
         return EINVAL;
     }
     
-    /* Find a task within a given container based on current task_struct*/
+    /* Find a task within a given container based on current task_struct */
     struct task *task = NULL;
     task = get_task(container, current->pid);
     if (!task) {
-        printk(KERN_ERR "No such task with PID: %d is found in the container with CID: %d\n", current->pid, container.cid);
+        printk(KERN_ERR "No such task with PID: %d is found in the container with CID: %d.\n", current->pid, container.cid);
         mutex_unlock(&lock);
         return EINVAL;
     }
+    
+    /* Delete the task from the container */
     list_del(&task->list);
     free(task);
+    
+    /* If container does not have anymore tasks in it, remove container */
     if (list_empty(&container->task_list)) {
         list_del(&container->list)
         free(container);
@@ -141,13 +201,24 @@ int processor_container_delete(struct processor_container_cmd __user *user_cmd)
  */
 int processor_container_create(struct processor_container_cmd __user *user_cmd)
 {
-    mutex_lock(&lock);
-    /* Find container with given cid */
     struct container *container = NULL;
+    mutex_lock(&lock);
+
+    /* Find container with given cid */
     container = get_container(user_cmd->cid);
     if (!container) {
         /* Could not find container in list - create it */
+        container = create_container(user_cmd->cid);
+        if (!container) {
+            printk(KERN_ERR "Unable to create container\n");
+            mutex_unlock(&lock);
+            return -1;
+        }
     }
+
+    /* Create task */
+    (void) create_task(container, current);
+
     mutex_unlock(&lock);
     return 0;
 }
