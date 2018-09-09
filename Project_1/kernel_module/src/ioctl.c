@@ -61,6 +61,8 @@ struct task {
 struct mutex lock;
 
 struct list_head *container_list;
+
+
 /**
  * Delete the task in the container.
  * 
@@ -69,6 +71,20 @@ struct list_head *container_list;
  */
 int processor_container_delete(struct processor_container_cmd __user *user_cmd)
 {
+    mutex_lock(lock);
+    container = get_container(user_cmd);
+    if (container == NULL) {
+        printk(KERN_ERR "No such CID: %d is found in the container list \n",
+                user_cmd->cid);
+        return 0;
+    }
+    
+    
+    if (task_list == NULL) {
+        list_del(container)
+        free(container);
+    }
+    mutex_unlock(lock);
     return 0;
 }
 
