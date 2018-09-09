@@ -58,7 +58,7 @@ struct task {
     struct list_head *list;
 };
 
-struct mutex *lock;
+struct mutex lock;
 
 struct list_head *container_list;
 /**
@@ -82,6 +82,9 @@ int processor_container_delete(struct processor_container_cmd __user *user_cmd)
  */
 int processor_container_create(struct processor_container_cmd __user *user_cmd)
 {
+    mutex_lock(lock);
+
+    mutex_unlock(lock);
     return 0;
 }
 
