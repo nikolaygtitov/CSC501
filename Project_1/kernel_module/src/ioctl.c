@@ -46,6 +46,7 @@
 #include <linux/kthread.h>
 #include <linux/list.h>
 #include <linux/mutex.h>
+// #include <stdlib.h>
 
 #define DEBUG(format, ...) printk(KERN_DEBUG "[csc501:%s:%d]: " format, __func__, __LINE__, __VA_ARGS__)
 
@@ -160,33 +161,33 @@ static struct task * create_task(struct container *container, struct task_struct
  */
 int processor_container_delete(struct processor_container_cmd __user *user_cmd)
 {
+    struct container *container = NULL;
+    struct task *task = NULL;
     mutex_lock(&lock);
     /* Find container with given cid */
-    struct container *container = NULL;
     container = get_container(user_cmd->cid);
     if (!container) {
-        printk(KERN_ERR "No such CID: %d is found in the container list.\n", user_cmd->cid);
+        printk(KERN_ERR "No such CID: %d is found in the container list.\n", (unsigned) user_cmd->cid);
         mutex_unlock(&lock);
         return EINVAL;
     }
     
     /* Find a task within a given container based on current task_struct */
-    struct task *task = NULL;
     task = get_task(container, current->pid);
     if (!task) {
-        printk(KERN_ERR "No such task with PID: %d is found in the container with CID: %d.\n", current->pid, container.cid);
+        printk(KERN_ERR "No such task with PID: %d is found in the container with CID: %d.\n", (unsigned) current->pid, (unsigned) container->cid);
         mutex_unlock(&lock);
         return EINVAL;
     }
     
     /* Delete the task from the container */
     list_del(&task->list);
-    free(task);
+    // free(task);
     
     /* If container does not have anymore tasks in it, remove container */
     if (list_empty(&container->task_list)) {
-        list_del(&container->list)
-        free(container);
+        list_del(&container->list);
+        // free(container);
     }
     mutex_unlock(&lock);
     return 0;
