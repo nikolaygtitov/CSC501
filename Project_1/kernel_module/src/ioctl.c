@@ -46,7 +46,6 @@
 #include <linux/kthread.h>
 #include <linux/list.h>
 #include <linux/mutex.h>
-// #include <stdlib.h>
 
 #define DEBUG(format, ...) printk(KERN_DEBUG "[csc501:%s:%d]: " format, __func__, __LINE__, __VA_ARGS__)
 
@@ -182,12 +181,12 @@ int processor_container_delete(struct processor_container_cmd __user *user_cmd)
     
     /* Delete the task from the container */
     list_del(&task->list);
-    // free(task);
+    kfree(task);
     
     /* If container does not have anymore tasks in it, remove container */
     if (list_empty(&container->task_list)) {
         list_del(&container->list);
-        // free(container);
+        kfree(container);
     }
     mutex_unlock(&lock);
     return 0;
