@@ -44,9 +44,12 @@
 #include <linux/mutex.h>
 #include <linux/sched.h>
 
+struct task;
+
 extern struct miscdevice processor_container_dev;
 extern struct mutex lock;
 extern struct list_head container_list;
+extern struct task *cur_task;
 
 /**
  * Initialize and register the kernel module
@@ -59,6 +62,7 @@ int processor_container_init(void)
     else {
         mutex_init(&lock);
         INIT_LIST_HEAD(&container_list);
+        cur_task = NULL;
         printk(KERN_ERR "\"processor_container\" misc device installed\n");
     }
     return ret;

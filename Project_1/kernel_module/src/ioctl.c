@@ -57,12 +57,15 @@ struct container {
 
 struct task {
     pid_t pid;
+    struct task_struct *task_struct;
+    struct container *container;
     struct list_head list;
 };
 
 struct mutex lock;
 
 struct list_head container_list;
+struct task *cur_task;
 
 /**
  * Get the container with the given cid.
@@ -128,7 +131,7 @@ static struct container * create_container(__u64 cid)
 /**
  * Create task.
  */
-static struct task * create_task(struct container *container, struct task_struct *thread)
+static struct task * create_task(struct container *container, struct task_struct *task_struct)
 {
     struct task *task = NULL;
 
@@ -139,7 +142,9 @@ static struct task * create_task(struct container *container, struct task_struct
     }
 
     /* Set task fields */
-    task->pid = thread->pid;
+    task->pid = task_struct->pid;
+    task->task_struct = task_struct;
+    task->container = container;
 
     /* Initialize task list head */
     INIT_LIST_HEAD(&task->list);
@@ -203,6 +208,14 @@ int processor_container_delete(struct processor_container_cmd __user *user_cmd)
 int processor_container_create(struct processor_container_cmd __user *user_cmd)
 {
     struct container *container = NULL;
+    struct task *task = NULL;
+
+#if 0
+    /* Deschedule new task */
+    set_current_state(TASK_INTERRUPTIBLE);
+    schedule();
+#endif
+
     mutex_lock(&lock);
 
     /* Find container with given cid */
@@ -218,7 +231,15 @@ int processor_container_create(struct processor_container_cmd __user *user_cmd)
     }
 
     /* Create task */
-    (void) create_task(container, current);
+    task = create_task(container, current);
+
+#if 0
+    /* Wake up if first task */
+    if (!cur_task) {
+        cur_task = task;
+        wake_up_process(cur_task->task_struct);
+    }
+#endif
 
     mutex_unlock(&lock);
     return 0;
@@ -232,6 +253,37 @@ int processor_container_create(struct processor_container_cmd __user *user_cmd)
  */
 int processor_container_switch(struct processor_container_cmd __user *user_cmd)
 {
+    struct list_head *next_container_list_head = NULL;;
+    struct container *next_container = NULL;
+
+    mutex_lock(&lock);
+
+    DEBUG("cur_task->pid: %d, current->pid: %d\n", cur_task->pid, current->pid);
+
+    /* Move current task to end of task list */
+    list_move_tail(&cur_task->list, &cur_task->container->task_list);
+
+    /* Get next container */
+    next_container_list_head = cur_task->container->list.next;
+    if (next_container_list_head == &container_list) {
+        /* Wrap back to beginning */
+        next_container_list_head = next_container_list_head->next;
+    }
+    next_container = (struct container *) list_entry(next_container_list_head, struct container, list);
+
+    /* Get first task from next container */
+    cur_task = (struct task *) list_entry(next_container->task_list.next, struct task, list);
+
+#if 0
+    /* Deschedule previous task */
+    set_current_state(TASK_INTERRUPTIBLE);
+    schedule();
+
+    /* Move task to running state */
+    wake_up_process(cur_task->task_struct);
+#endif
+
+    mutex_unlock(&lock);
     return 0;
 }
 
