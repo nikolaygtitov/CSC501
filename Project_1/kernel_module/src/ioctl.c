@@ -60,9 +60,9 @@ struct task {
     struct list_head list;
 };
 
-struct mutex lock;
+DEFINE_MUTEX(lock);
 
-struct list_head container_list;
+LIST_HEAD(container_list);
 
 /**
  * Get the container with the given cid.
