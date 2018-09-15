@@ -109,6 +109,8 @@ static struct container * create_container(__u64 cid)
         return NULL;
     }
 
+    container->cid = cid;
+
     /* Initialize container list head */
     INIT_LIST_HEAD(&container->list);
 
@@ -153,6 +155,32 @@ static struct task * create_task(struct container *container, struct task_struct
 }
 
 /**
+ * Find next task to run - first task from next container
+ */
+static struct task * get_next_task(struct task *task)
+{
+    struct list_head *next_container_list_head = NULL;
+    struct container *next_container = NULL;
+    struct task *next_task = NULL;
+
+    /* Move task to end of task list */
+    list_move_tail(&task->list, &task->container->task_list);
+
+    /* Get next container */
+    next_container_list_head = task->container->list.next;
+    if (next_container_list_head == &container_list) {
+        /* Wrap back to beginning */
+        next_container_list_head = next_container_list_head->next;
+    }
+    next_container = (struct container *) list_entry(next_container_list_head, struct container, list);
+
+    /* Get first task from next container */
+    next_task = (struct task *) list_entry(next_container->task_list.next, struct task, list);
+
+    return next_task;
+}
+
+/**
  * Delete the task in the container.
  * 
  * external functions needed:
@@ -161,7 +189,7 @@ static struct task * create_task(struct container *container, struct task_struct
 int processor_container_delete(struct processor_container_cmd __user *user_cmd)
 {
     struct container *container = NULL;
-    struct task *task = NULL;
+    struct task *task, *next_task = NULL;
     mutex_lock(&lock);
     /* Find container with given cid */
     container = get_container(user_cmd->cid);
@@ -178,14 +206,27 @@ int processor_container_delete(struct processor_container_cmd __user *user_cmd)
         mutex_unlock(&lock);
         return EINVAL;
     }
-    
+
+
+    /* Schedule next task */
+    next_task = get_next_task(cur_task);
+    if (next_task && next_task != cur_task) {
+        DEBUG("Waking up task: %d\n", next_task->pid);
+        wake_up_process(next_task->task_struct);
+    }
+    cur_task = next_task;
+
     /* Delete the task from the container */
     list_del(&task->list);
+    DEBUG("Deleted task: %d\n", task->pid);
+
+    /* Free task */
     kfree(task);
     
     /* If container does not have anymore tasks in it, remove container */
     if (list_empty(&container->task_list)) {
         list_del(&container->list);
+        DEBUG("Deleted container: %d\n", (unsigned)container->cid);
         kfree(container);
     }
     mutex_unlock(&lock);
@@ -227,16 +268,14 @@ int processor_container_create(struct processor_container_cmd __user *user_cmd)
     /* Set cur_task if this is the first task */
     if (!cur_task) {
         cur_task = task;
-    }
-#if 0
-    else {
+        mutex_unlock(&lock);
+    } else {
+        mutex_unlock(&lock);
         /* Deschedule new task */
         set_current_state(TASK_INTERRUPTIBLE);
         schedule();
     }
-#endif
 
-    mutex_unlock(&lock);
     return 0;
 }
 
@@ -248,52 +287,40 @@ int processor_container_create(struct processor_container_cmd __user *user_cmd)
  */
 int processor_container_switch(struct processor_container_cmd __user *user_cmd)
 {
-    struct list_head *next_container_list_head = NULL;;
-    struct container *next_container = NULL;
     struct task *prev_task = NULL;
     struct task *next_task = NULL;
     bool skip_switch = false;
 
     mutex_lock(&lock);
 
-    DEBUG("cur_task->pid: %d, current->pid: %d\n", cur_task->pid, current->pid);
-
-    /* Move current task to end of task list */
-    list_move_tail(&cur_task->list, &cur_task->container->task_list);
-
-    /* Get next container */
-    next_container_list_head = cur_task->container->list.next;
-    if (next_container_list_head == &container_list) {
-        /* Wrap back to beginning */
-        next_container_list_head = next_container_list_head->next;
+    /* Only switch if called from cur_task context - otherwise we don't know how to stop cur_task */
+    if (current->pid != cur_task->pid) {
+        DEBUG("Cannot switch: current:%d != cur_task:%d\n", current->pid, cur_task->pid);
+        mutex_unlock(&lock);
+        return -1;
     }
-    next_container = (struct container *) list_entry(next_container_list_head, struct container, list);
-
-    DEBUG("Switching container: %d->%d\n", (unsigned)cur_task->container->cid, (unsigned)next_container->cid);
 
     /* Get first task from next container */
-    next_task = (struct task *) list_entry(next_container->task_list.next, struct task, list);
+    next_task = get_next_task(cur_task);
     if (next_task->pid == cur_task->pid) {
         skip_switch = true;
     }
     prev_task = cur_task;
     cur_task = next_task;
+
     mutex_unlock(&lock);
 
     if (skip_switch) {
         DEBUG("Already running %d\n", next_task->pid);
     } else {
         /* Move task to running state */
-        DEBUG("Switching task: %d->%d\n", prev_task->pid, next_task->pid);
+        DEBUG("Switching task: %d:%d->%d:%d\n", (unsigned)prev_task->container->cid, prev_task->pid,
+                                                (unsigned)next_task->container->cid, next_task->pid);
         wake_up_process(next_task->task_struct);
 
-        if (prev_task->pid == current->pid) {
-            /* Deschedule previous task */
-            set_current_state(TASK_INTERRUPTIBLE);
-            schedule();
-        } else {
-            DEBUG("Could not stop task %d\n", prev_task->pid);
-        }
+        /* Deschedule previous task */
+        set_current_state(TASK_INTERRUPTIBLE);
+        schedule();
     }
 
     return 0;
