@@ -47,7 +47,7 @@
 #include <linux/list.h>
 #include <linux/mutex.h>
 
-#define DEBUG(format, ...) printk(KERN_DEBUG "[csc501:%s:%d]: " format, __func__, __LINE__, __VA_ARGS__)
+#define DEBUG(format, ...) printk(KERN_DEBUG "[pid:%d][csc501:%s:%d]: " format, current->pid, __func__, __LINE__, __VA_ARGS__)
 
 struct container {
     __u64 cid;
@@ -70,10 +70,8 @@ LIST_HEAD(container_list);
  */
 static struct container * get_container(__u64 cid)
 {
-    struct list_head *list_itr = NULL;
     struct container *container = NULL;
-    list_for_each(list_itr, &container_list) {
-        container = (struct container *) list_entry(list_itr, struct container, list);
+    list_for_each_entry(container, &container_list, list) {
         if (container->cid == cid) {
             return container;
         }
@@ -87,10 +85,8 @@ static struct container * get_container(__u64 cid)
  */
 static struct task * get_task(struct container *container, __u64 pid)
 {
-    struct list_head *list_itr = NULL;
     struct task *task = NULL;
-    list_for_each(list_itr, &container->task_list) {
-        task = (struct task *) list_entry(list_itr, struct task, list);
+    list_for_each_entry(task, &container->task_list, list) {
         if (task->pid == pid) {
             return task;
         }
