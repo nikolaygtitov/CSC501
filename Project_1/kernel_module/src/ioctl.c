@@ -213,8 +213,10 @@ int processor_container_delete(struct processor_container_cmd __user *user_cmd)
     if (next_task && next_task != cur_task) {
         DEBUG("Waking up task: %d\n", next_task->pid);
         wake_up_process(next_task->task_struct);
+        cur_task = next_task;
+    } else {
+        cur_task = NULL;
     }
-    cur_task = next_task;
 
     /* Delete the task from the container */
     list_del(&task->list);
@@ -292,6 +294,13 @@ int processor_container_switch(struct processor_container_cmd __user *user_cmd)
     bool skip_switch = false;
 
     mutex_lock(&lock);
+
+    /* Cannot switch if cur_task is NULL */
+    if (!cur_task) {
+        DEBUG("Cannot switch: cur_task is NULL (called by pid %d)\n", current->pid);
+        mutex_unlock(&lock);
+        return -1;
+    }
 
     /* Only switch if called from cur_task context - otherwise we don't know how to stop cur_task */
     if (current->pid != cur_task->pid) {
