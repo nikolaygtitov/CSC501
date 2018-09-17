@@ -45,5 +45,6 @@ struct processor_container_cmd
 #define PCONTAINER_IOCTL_DELETE _IOWR('N', 0x45, struct processor_container_cmd)
 #define PCONTAINER_IOCTL_CREATE _IOWR('N', 0x46, struct processor_container_cmd)
 #define PCONTAINER_IOCTL_CSWITCH _IOWR('N', 0x47, struct processor_container_cmd)
+#define PCONTAINER_IOCTL_DEBUG _IOWR('N', 0x48, struct processor_container_cmd)
 
 #endif

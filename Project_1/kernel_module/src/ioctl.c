@@ -190,6 +190,9 @@ int processor_container_delete(struct processor_container_cmd __user *user_cmd)
 {
     struct container *container = NULL;
     struct task *task, *next_task = NULL;
+
+    DEBUG("Called delete(%d), pid:%d\n", (unsigned)user_cmd->cid, current->pid);
+
     mutex_lock(&lock);
     /* Find container with given cid */
     container = get_container(user_cmd->cid);
@@ -293,6 +296,8 @@ int processor_container_switch(struct processor_container_cmd __user *user_cmd)
     struct task *next_task = NULL;
     bool skip_switch = false;
 
+    DEBUG("Called switch(%d), pid:%d\n", (unsigned)user_cmd->cid, current->pid);
+
     mutex_lock(&lock);
 
     /* Cannot switch if cur_task is NULL */
@@ -329,6 +334,7 @@ int processor_container_switch(struct processor_container_cmd __user *user_cmd)
 
         /* Deschedule previous task */
         set_current_state(TASK_INTERRUPTIBLE);
+        DEBUG("Sleeping: %d\n", current->pid);
         schedule();
     }
 
@@ -350,6 +356,8 @@ int processor_container_ioctl(struct file *filp, unsigned int cmd,
         return processor_container_create((void __user *)arg);
     case PCONTAINER_IOCTL_DELETE:
         return processor_container_delete((void __user *)arg);
+    case PCONTAINER_IOCTL_DEBUG:
+        return processor_container_debug((void __user *)arg);
     default:
         return -ENOTTY;
     }
