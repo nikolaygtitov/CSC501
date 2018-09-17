@@ -17,6 +17,7 @@ extern "C"
 
     int pcontainer_delete(int devfd, int cid);
     int pcontainer_create(int devfd, int cid);
+    int pcontainer_debug(int devfd, int cid);
     int pcontainer_context_switch_handler(int devfd, int cid);
     int pcontainer_init(int devfd);
     int DEVFD;
