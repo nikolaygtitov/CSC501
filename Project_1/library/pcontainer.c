@@ -32,3 +32,14 @@ int pcontainer_create(int devfd, int id)
     cmd.cid = id;
     return ioctl(devfd, PCONTAINER_IOCTL_CREATE, &cmd);
 }
+
+/**
+ * create function in user space that sends command to kernel space
+ * for debugging purposes of kernel and ioctl to dump all containers and task.
+ */
+int pcontainer_debug(int devfd, int id)
+{
+    struct processor_container_cmd cmd;
+    cmd.cid = id;
+    return ioctl(devfd, PCONTAINER_IOCTL_DEBUG, &cmd);
+}
