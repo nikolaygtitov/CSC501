@@ -355,6 +355,59 @@ int processor_container_switch(struct processor_container_cmd __user *user_cmd)
     return 0;
 }
 
+static void debug_print_task(struct task *task)
+{
+    if (!task) {
+        DEBUG("  NULL%s\n", "");
+    } else {
+        DEBUG("  TASK: %d\n", task->pid);
+        DEBUG("    State: %d\n", (int)task->task_struct->state);
+    }
+}
+
+static void debug_print_container(struct container *container)
+{
+    struct task *task = NULL;
+    DEBUG("CONTAINER: %d\n", (unsigned)container->cid);
+    /* Print container data */
+    list_for_each_entry(task, &container->task_list, list) {
+        debug_print_task(task);
+    }
+}
+
+/**
+ * Print debug information
+ */
+int processor_container_debug(struct processor_container_cmd __user *user_cmd)
+{
+    int locked = 0;
+    struct container *container = NULL;
+
+    /* Print mutex state and lock if possible - don't bother if someone is holding the lock */
+    locked = mutex_trylock(&lock);
+    if (!locked) {
+        DEBUG("Unable to acquire mutex: %p\n", &lock);
+    } else {
+        DEBUG("Mutex acquired: %p\n", &lock);
+    }
+
+    /* Print current task */
+    DEBUG("CURRENT TASK:%s\n", "");
+    debug_print_task(cur_task);
+
+    /* Print container data */
+    list_for_each_entry(container, &container_list, list) {
+        debug_print_container(container);
+    }
+
+    /* Unlock if we successfully locked */
+    if (locked) {
+        mutex_unlock(&lock);
+        DEBUG("Mutex released: %p\n", &lock);
+    }
+    return 0;
+}
+
 /**
  * control function that receive the command in user space and pass arguments to
  * corresponding functions.
