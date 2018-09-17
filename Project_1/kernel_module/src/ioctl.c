@@ -221,7 +221,8 @@ int processor_container_delete(struct processor_container_cmd __user *user_cmd)
     if (next_task && next_task != cur_task) {
         DEBUG("Next task found. Attempt to wake up, TID: %d\n", (unsigned) next_task->pid);
         DEBUG("Waking up task: %d\n", next_task->pid);
-        wake_up_process(next_task->task_struct);
+        //wake_up_process(next_task->task_struct);
+        while(wake_up_process(next_task->task_struct) == 0);
         cur_task = next_task;
         DEBUG("Next task is awaken and it becomes current task, TID: %d\n", (unsigned) cur_task->pid);
     } else {
@@ -341,7 +342,8 @@ int processor_container_switch(struct processor_container_cmd __user *user_cmd)
         /* Move task to running state */
         DEBUG("Switching task: %d:%d->%d:%d\n", (unsigned)prev_task->container->cid, prev_task->pid,
                                                 (unsigned)next_task->container->cid, next_task->pid);
-        wake_up_process(next_task->task_struct);
+        //wake_up_process(next_task->task_struct);
+        while(wake_up_process(next_task->task_struct) == 0);
         DEBUG("Switch is succesfull: %d:%d->%d:%d\n", (unsigned)prev_task->container->cid, prev_task->pid,
                                                       (unsigned)next_task->container->cid, next_task->pid);
 
