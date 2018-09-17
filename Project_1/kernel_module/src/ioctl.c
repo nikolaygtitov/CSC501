@@ -188,6 +188,8 @@ static struct task * get_next_task(struct task *task)
  */
 int processor_container_delete(struct processor_container_cmd __user *user_cmd)
 {
+    /* DEBUG("Start deleting...\n"); */ 
+    
     struct container *container = NULL;
     struct task *task, *next_task = NULL;
 
@@ -201,7 +203,9 @@ int processor_container_delete(struct processor_container_cmd __user *user_cmd)
         mutex_unlock(&lock);
         return EINVAL;
     }
-    
+
+    DEBUG("Start Deleting. Container found, Container: %d.\n Attempt to find a task...\n", (unsigned) container->cid);
+
     /* Find a task within a given container based on current task_struct */
     task = get_task(container, current->pid);
     if (!task) {
@@ -210,26 +214,33 @@ int processor_container_delete(struct processor_container_cmd __user *user_cmd)
         return EINVAL;
     }
 
+    DEBUG("Task found, TID: %d.\nAttempt to schedule next task...\n", (unsigned) task->pid);
 
     /* Schedule next task */
     next_task = get_next_task(cur_task);
     if (next_task && next_task != cur_task) {
+        DEBUG("Next task found. Attempt to wake up, TID: %d\n", (unsigned) next_task->pid);
         DEBUG("Waking up task: %d\n", next_task->pid);
         wake_up_process(next_task->task_struct);
         cur_task = next_task;
+        DEBUG("Next task is awaken and it becomes current task, TID: %d\n", (unsigned) cur_task->pid);
     } else {
+        DEBUG("Next task NOT found assign current task to NULL, found task, TID:%d\n", task->pid);
         cur_task = NULL;
     }
 
     /* Delete the task from the container */
+    DEBUG("Deleting task from container, CID: %d, TID: %d\n", (unsigned) container->cid, (unsigned) task->pid);
     list_del(&task->list);
     DEBUG("Deleted task: %d\n", task->pid);
 
     /* Free task */
+    DEBUG("Freeing task, TID: %d\n", (unsigned) task->pid);
     kfree(task);
     
     /* If container does not have anymore tasks in it, remove container */
     if (list_empty(&container->task_list)) {
+        DEBUG("Container does not have anymore tasks in it - remove it, CID: %d\n", (unsigned) container->cid);
         list_del(&container->list);
         DEBUG("Deleted container: %d\n", (unsigned)container->cid);
         kfree(container);
@@ -331,6 +342,9 @@ int processor_container_switch(struct processor_container_cmd __user *user_cmd)
         DEBUG("Switching task: %d:%d->%d:%d\n", (unsigned)prev_task->container->cid, prev_task->pid,
                                                 (unsigned)next_task->container->cid, next_task->pid);
         wake_up_process(next_task->task_struct);
+        DEBUG("Switch is succesfull: %d:%d->%d:%d\n", (unsigned)prev_task->container->cid, prev_task->pid,
+                                                      (unsigned)next_task->container->cid, next_task->pid);
+
 
         /* Deschedule previous task */
         set_current_state(TASK_INTERRUPTIBLE);
