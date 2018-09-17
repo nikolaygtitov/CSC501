@@ -8,6 +8,9 @@
 #include <sys/mman.h>
 #include <sys/wait.h>
 #include <sys/types.h>
+#include <pcontainer.h>
+
+int devfd;
 
 /**
  * main function to debug kernel with help of ioctl 
@@ -23,6 +26,6 @@ int main(int argc, char *argv[])
     }
     fprintf(stderr, "Opened the kernel module for debugging");
     // allocate/associate a container for the thread.
-    pcontainer_debug(devfd, cid);
+    pcontainer_debug(devfd, 0);
     return 0;
 }
