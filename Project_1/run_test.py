@@ -71,7 +71,7 @@ if __name__ == '__main__':
         print '\nRun ' + str(i)
         clear_dmesg()
 
-        test_output = subprocess.check_output(['./test.sh', '1', '100'], stderr=subprocess.STDOUT, universal_newlines=True)
+        test_output = subprocess.check_output(['./test.sh', '2', '2', '1'], stderr=subprocess.STDOUT, universal_newlines=True)
         print test_output
 
         parser = TestParser(test_output)
