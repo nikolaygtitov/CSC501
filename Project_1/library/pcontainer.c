@@ -8,6 +8,7 @@ int pcontainer_context_switch_handler(int devfd, int id)
 {
     struct processor_container_cmd cmd;
     cmd.cid = id;
+    fprintf(stderr, "%d: switch\n", (int)syscall(SYS_gettid));
     return ioctl(devfd, PCONTAINER_IOCTL_CSWITCH, &cmd);
 }
 

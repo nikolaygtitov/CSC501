@@ -48,6 +48,8 @@
 #include <linux/mutex.h>
 
 #define DEBUG(format, ...) printk(KERN_DEBUG "[pid:%d][csc501:%s:%d]: " format, current->pid, __func__, __LINE__, __VA_ARGS__)
+#define DBUF_LEN 8192
+#define D(str) strncat(dbuf, str, DBUF_LEN);
 
 struct container {
     __u64 cid;
@@ -65,6 +67,7 @@ struct task {
 DEFINE_MUTEX(lock);
 struct task *cur_task;
 LIST_HEAD(container_list);
+char dbuf[DBUF_LEN] = "\0";
 
 /**
  * Get the container with the given cid.
@@ -193,6 +196,7 @@ int processor_container_delete(struct processor_container_cmd __user *user_cmd)
     struct container *container = NULL;
     struct task *task, *next_task = NULL;
 
+    D("d");
     DEBUG("Called delete(%d), pid:%d\n", (unsigned)user_cmd->cid, current->pid);
 
     mutex_lock(&lock);
@@ -200,6 +204,7 @@ int processor_container_delete(struct processor_container_cmd __user *user_cmd)
     container = get_container(user_cmd->cid);
     if (!container) {
         printk(KERN_ERR "No such CID: %d is found in the container list.\n", (unsigned) user_cmd->cid);
+        D("!1");
         mutex_unlock(&lock);
         return EINVAL;
     }
@@ -210,6 +215,7 @@ int processor_container_delete(struct processor_container_cmd __user *user_cmd)
     task = get_task(container, current->pid);
     if (!task) {
         printk(KERN_ERR "No such task with PID: %d is found in the container with CID: %d.\n", (unsigned) current->pid, (unsigned) container->cid);
+        D("!2");
         mutex_unlock(&lock);
         return EINVAL;
     }
@@ -222,7 +228,11 @@ int processor_container_delete(struct processor_container_cmd __user *user_cmd)
         DEBUG("Next task found. Attempt to wake up, TID: %d\n", (unsigned) next_task->pid);
         DEBUG("Waking up task: %d\n", next_task->pid);
         //wake_up_process(next_task->task_struct);
-        while(wake_up_process(next_task->task_struct) == 0);
+        D("(");
+        while(wake_up_process(next_task->task_struct) == 0) {
+            D(".")
+        }
+        D(")");
         cur_task = next_task;
         DEBUG("Next task is awaken and it becomes current task, TID: %d\n", (unsigned) cur_task->pid);
     } else {
@@ -263,6 +273,7 @@ int processor_container_create(struct processor_container_cmd __user *user_cmd)
     struct container *container = NULL;
     struct task *task = NULL;
 
+    D("c");
     DEBUG("Called create(%d), pid:%d\n", (unsigned)user_cmd->cid, current->pid);
 
     mutex_lock(&lock);
@@ -274,6 +285,7 @@ int processor_container_create(struct processor_container_cmd __user *user_cmd)
         container = create_container(user_cmd->cid);
         if (!container) {
             printk(KERN_ERR "Unable to create container\n");
+            D("!3");
             mutex_unlock(&lock);
             return -1;
         }
@@ -308,6 +320,7 @@ int processor_container_switch(struct processor_container_cmd __user *user_cmd)
     struct task *next_task = NULL;
     bool skip_switch = false;
 
+    D("s");
     DEBUG("Called switch(%d), pid:%d\n", (unsigned)user_cmd->cid, current->pid);
 
     mutex_lock(&lock);
@@ -315,6 +328,7 @@ int processor_container_switch(struct processor_container_cmd __user *user_cmd)
     /* Cannot switch if cur_task is NULL */
     if (!cur_task) {
         DEBUG("Cannot switch: cur_task is NULL (called by pid %d)\n", current->pid);
+        D("!4");
         mutex_unlock(&lock);
         return -1;
     }
@@ -322,6 +336,7 @@ int processor_container_switch(struct processor_container_cmd __user *user_cmd)
     /* Only switch if called from cur_task context - otherwise we don't know how to stop cur_task */
     if (current->pid != cur_task->pid) {
         DEBUG("Cannot switch: current:%d != cur_task:%d\n", current->pid, cur_task->pid);
+        D("!5");
         mutex_unlock(&lock);
         return -1;
     }
@@ -343,7 +358,10 @@ int processor_container_switch(struct processor_container_cmd __user *user_cmd)
         DEBUG("Switching task: %d:%d->%d:%d\n", (unsigned)prev_task->container->cid, prev_task->pid,
                                                 (unsigned)next_task->container->cid, next_task->pid);
         //wake_up_process(next_task->task_struct);
-        while(wake_up_process(next_task->task_struct) == 0);
+        D("<");
+        while(wake_up_process(next_task->task_struct) == 0) {
+            D(".")
+        }
         DEBUG("Switch is succesfull: %d:%d->%d:%d\n", (unsigned)prev_task->container->cid, prev_task->pid,
                                                       (unsigned)next_task->container->cid, next_task->pid);
 
@@ -351,8 +369,10 @@ int processor_container_switch(struct processor_container_cmd __user *user_cmd)
         /* Deschedule previous task */
         set_current_state(TASK_INTERRUPTIBLE);
         DEBUG("Sleeping: %d\n", current->pid);
+        D(">");
         schedule();
     }
+    D("-");
 
     return 0;
 }
@@ -401,6 +421,9 @@ int processor_container_debug(struct processor_container_cmd __user *user_cmd)
     list_for_each_entry(container, &container_list, list) {
         debug_print_container(container);
     }
+
+    D(";");
+    DEBUG("DBUF: %s\n", dbuf);
 
     /* Unlock if we successfully locked */
     if (locked) {

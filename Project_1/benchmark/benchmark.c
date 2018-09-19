@@ -30,6 +30,8 @@ void *thread_body(void *x)
     // allocate/associate a container for the thread.
     pcontainer_create(devfd, cid);
 
+    fprintf(stderr, "%d: created\n", (int)syscall(SYS_gettid));
+
     while (total < 50000000)
     {
         // calculate some dumb numbers here.
@@ -40,8 +42,11 @@ void *thread_body(void *x)
         }
 
         // update the total counter.
+        fprintf(stderr, "%d: lock\n", (int)syscall(SYS_gettid));
         pthread_mutex_lock(&mutex);
         total += 1000000;
+        fprintf(stderr, "%d: total: %d\n", (int)syscall(SYS_gettid), total);
+        fprintf(stderr, "%d: unlock\n", (int)syscall(SYS_gettid));
         pthread_mutex_unlock(&mutex);
     }
     // The sum of each container should be close.
