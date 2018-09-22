@@ -13,7 +13,7 @@
 #include <sys/types.h>
 
 int devfd;
-pthread_mutex_t mutex;
+pthread_spinlock_t lock;
 int total = 0;
 
 /**
@@ -30,7 +30,9 @@ void *thread_body(void *x)
     // allocate/associate a container for the thread.
     pcontainer_create(devfd, cid);
 
+    pthread_spin_lock(&lock);
     fprintf(stderr, "%d: created\n", (int)syscall(SYS_gettid));
+    pthread_spin_unlock(&lock);
 
     while (total < 50000000)
     {
@@ -42,15 +44,14 @@ void *thread_body(void *x)
         }
 
         // update the total counter.
-        fprintf(stderr, "%d: lock\n", (int)syscall(SYS_gettid));
-        pthread_mutex_lock(&mutex);
+        pthread_spin_lock(&lock);
         total += 1000000;
-        fprintf(stderr, "%d: total: %d\n", (int)syscall(SYS_gettid), total);
-        fprintf(stderr, "%d: unlock\n", (int)syscall(SYS_gettid));
-        pthread_mutex_unlock(&mutex);
+        pthread_spin_unlock(&lock);
     }
     // The sum of each container should be close.
+    pthread_spin_lock(&lock);
     fprintf(stderr, "TID: %d, Container: %d, Processed: %d\n", (int)syscall(SYS_gettid), cid, processed);
+    pthread_spin_unlock(&lock);
 
     // Delete a container.
     pcontainer_delete(devfd, cid);
@@ -113,7 +114,7 @@ int main(int argc, char *argv[])
 
     // alarm and mutex lock initialization
     pcontainer_init(devfd);
-    pthread_mutex_init(&mutex, NULL);
+    pthread_spin_init(&lock, PTHREAD_PROCESS_PRIVATE);
 
     // create threads and assign tasks.
     threads = (pthread_t*) calloc(total_tasks, sizeof(pthread_t));

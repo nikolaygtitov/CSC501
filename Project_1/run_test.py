@@ -71,7 +71,7 @@ if __name__ == '__main__':
         print '\nRun ' + str(i)
         clear_dmesg()
 
-        test_output = subprocess.check_output(['./test.sh', '2', '2', '1'], stderr=subprocess.STDOUT, universal_newlines=True)
+        test_output = subprocess.check_output(['./test.sh', '1', '100'], stderr=subprocess.STDOUT, universal_newlines=True)
         print test_output
 
         parser = TestParser(test_output)
@@ -82,14 +82,14 @@ if __name__ == '__main__':
         containers = parser.containers
 
         # Check percent processed for each container
-        exp_processed_c = total_processed / float(len(containers))
-        for cid in containers:
-            act_processed_c = parser.get_total_processed_for_container(cid)
-            pct_error_processed_c = abs((act_processed_c - exp_processed_c) / exp_processed_c) * 100
-            if pct_error_processed_c < 10:
-                col = 'green'
-            else:
-                col = 'red'
-            print_color(col, 'Container %d: %d/%d => %d%%' % (cid, act_processed_c, exp_processed_c, pct_error_processed_c))
+#        exp_processed_c = total_processed / float(len(containers))
+#        for cid in containers:
+#            act_processed_c = parser.get_total_processed_for_container(cid)
+#            pct_error_processed_c = abs((act_processed_c - exp_processed_c) / exp_processed_c) * 100
+#            if pct_error_processed_c < 10:
+#                col = 'green'
+#            else:
+#                col = 'red'
+#            print_color(col, 'Container %d: %d/%d => %d%%' % (cid, act_processed_c, exp_processed_c, pct_error_processed_c))
 
         i += 1
