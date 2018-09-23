@@ -103,4 +103,12 @@ if __name__ == '__main__':
                 col = 'red'
             print_color(col, 'Container %d: %d/%d => %d%%' % (cid, act_processed_c, exp_processed_c, pct_error_processed_c))
 
+            # Check percent processed for each task in container
+            exp_processed_t = exp_processed_c
+            
+            
+            
+            
+            
+
         i += 1
