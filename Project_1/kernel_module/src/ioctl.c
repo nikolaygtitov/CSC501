@@ -167,8 +167,8 @@ static struct task * create_task(struct container *container, struct task_struct
     /* Initialize task list head */
     INIT_LIST_HEAD(&task->list);
 
-    /* Add to container task list */
-    list_add_tail(&task->list, &container->task_list);
+    /* Add this new task next to currently running task to the task list of the container */
+    list_add(&task->list, container->task_list.next);
 
     DEBUG("Added task %d:%d\n", (unsigned) container->cid, (unsigned) task->pid);
 
