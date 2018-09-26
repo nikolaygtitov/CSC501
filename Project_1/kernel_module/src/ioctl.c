@@ -1,3 +1,5 @@
+// Project 1: Nathan Schnoor, nfschnoo; Nikolay Titov, ngtitov;
+
 //////////////////////////////////////////////////////////////////////
 //                      North Carolina State University
 //

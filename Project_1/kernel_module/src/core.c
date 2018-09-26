@@ -1,3 +1,5 @@
+// Project 1: Nathan Schnoor, nfschnoo; Nikolay Titov, ngtitov;
+
 //////////////////////////////////////////////////////////////////////
 //                      North Carolina State University
 //
@@ -22,7 +24,7 @@
 //
 ////////////////////////////////////////////////////////////////////////
 //
-//   Author:  Hung-Wei Tseng, Yu-Chia Liu
+//   Author:  Hung-Wei Tseng, Yu-Chia Liu, Nathan Schnoor, Nikolay Titov
 //
 //   Description:
 //     Core of Kernel Module for Processor Container
