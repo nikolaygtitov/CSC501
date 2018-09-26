@@ -39,6 +39,12 @@ class TestParser:
             return self.number_of_tasks_for_container_dict[cid]
         raise Exception('Cannot find number of tasks in container ' + str(cid))
 
+    def iter_tasks_in_container(self, cid):
+        matches = self.TID_RE.findall(self.output)
+        for m in matches:
+            if int(m[1]) == cid:
+                yield int(m[0])
+
     @property
     def total_processed(self):
         matches = self.TID_RE.findall(self.output)
@@ -47,6 +53,13 @@ class TestParser:
     def get_total_processed_for_container(self, cid):
         matches = self.TID_RE.findall(self.output)
         return sum([int(m[2]) for m in matches if int(m[1]) == cid])
+
+    def get_processed_for_task(self, tid):
+        matches = self.TID_RE.findall(self.output)
+        for match in matches:
+            if int(match[0]) == tid:
+                return int(match[2])
+        return 0
 
     @property
     def containers(self):
@@ -74,8 +87,7 @@ if __name__ == '__main__':
     c = sys.argv[1]
     t = sys.argv[2:]
     if len(t) < int(c):
-        t = t * int(math.ceil(float(c) / len(t)))
-        t = t[:int(c)]
+        t = t + [t[-1]] * (int(c) - len(t))
 
     while not stop:
         print '\nRun ' + str(i)
@@ -101,14 +113,19 @@ if __name__ == '__main__':
                 col = 'green'
             else:
                 col = 'red'
+                stop = True
             print_color(col, 'Container %d: %d/%d => %d%%' % (cid, act_processed_c, exp_processed_c, pct_error_processed_c))
 
             # Check percent processed for each task in container
-            exp_processed_t = exp_processed_c
-            
-            
-            
-            
-            
+            exp_processed_t = exp_processed_c / float(parser.get_number_of_tasks_for_container(cid))
+            for tid in parser.iter_tasks_in_container(cid):
+                act_processed_t = parser.get_processed_for_task(tid)
+                pct_error_processed_t = abs((act_processed_t - exp_processed_t) / exp_processed_t) * 100
+                if pct_error_processed_t < 10:
+                    col = 'green'
+                else:
+                    col = 'red'
+                    stop = True
+                print_color(col, '    Task %d: %d/%d => %d%%' % (tid, act_processed_t, exp_processed_t, pct_error_processed_t))
 
         i += 1
