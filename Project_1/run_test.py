@@ -87,7 +87,7 @@ if __name__ == '__main__':
     c = sys.argv[1]
     t = sys.argv[2:]
     if len(t) < int(c):
-        t = t + list(t[-1]) * (int(c) - len(t))
+        t = t + [t[-1]] * (int(c) - len(t))
 
     while not stop:
         print '\nRun ' + str(i)
@@ -113,6 +113,7 @@ if __name__ == '__main__':
                 col = 'green'
             else:
                 col = 'red'
+                stop = True
             print_color(col, 'Container %d: %d/%d => %d%%' % (cid, act_processed_c, exp_processed_c, pct_error_processed_c))
 
             # Check percent processed for each task in container
@@ -124,11 +125,7 @@ if __name__ == '__main__':
                     col = 'green'
                 else:
                     col = 'red'
+                    stop = True
                 print_color(col, '    Task %d: %d/%d => %d%%' % (tid, act_processed_t, exp_processed_t, pct_error_processed_t))
-            
-            
-            
-            
-            
 
         i += 1
