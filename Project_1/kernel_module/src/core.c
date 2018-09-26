@@ -46,8 +46,6 @@
 #include <linux/mutex.h>
 #include <linux/sched.h>
 
-struct task;
-
 extern struct miscdevice processor_container_dev;
 
 /**
