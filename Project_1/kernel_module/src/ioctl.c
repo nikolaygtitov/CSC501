@@ -177,12 +177,13 @@ static struct task * create_task(struct container *container, struct task_struct
 
 /**
  * Delete the task in the container.
+ * 
  * Find currently running task based on pid. The first task in the task list of 
  * the container is always a currently running task. Iterate over containers 
  * and only check first tasks of each container.
  * If the task is the only remaining task in the task list of the container, do 
  * not wake up any other tasks, delete the task, and delete the container.
- * Otherwise, find next task to run, delete the current task, and wake up next 
+ * Otherwise, find next task to run, wake up next task, and delete the current 
  * task.
  * 
  * external functions needed:
@@ -242,12 +243,12 @@ int processor_container_delete(struct processor_container_cmd __user *user_cmd)
 
 /**
  * Create a task in the corresponding container.
+ * 
  * Check if container already exists. If it does not exist, create new 
  * container. 
- * Create new task. Insert new task at the end of the task list of the 
- * container.
- * If new task is the only task in the container, let it run. Otherwise, put it 
- * to sleep.
+ * Create new task. Insert new task into the task list of the container.
+ * If new task is the only task in the container, let it run.
+ * Otherwise, put the newly created task to sleep.
  * 
  * external functions needed:
  * copy_from_user(), mutex_lock(), mutex_unlock(), set_current_state(), schedule()
@@ -307,7 +308,8 @@ int processor_container_create(struct processor_container_cmd __user *user_cmd)
 }
 
 /**
- * Switch to the next task in the same container.
+ * Switch to the next task within the same container.
+ * 
  * Find currently running task based on pid. Since the first task in the task 
  * list of the container is always a currently running task, iterate over 
  * containers and only check first tasks of each container.
