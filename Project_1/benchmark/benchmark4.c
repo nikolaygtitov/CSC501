@@ -38,7 +38,7 @@ void *thread_body(void *x)
     while (total < 1000000000)
     {
         // calculate some dumb numbers here.
-        for (i = 0; i < 1000000; i++)
+        for (i = 0; i < 1000; i++)
         {
             sum += 1.0 / (1.2 + i);
             processed++;
@@ -47,7 +47,7 @@ void *thread_body(void *x)
         // update the total counter.
         pthread_spin_lock(&lock);
         pthread_mutex_lock(&mutex);
-        total += 1000000;
+        total += 1000;
         pthread_mutex_unlock(&mutex);
         pthread_spin_unlock(&lock);
     }

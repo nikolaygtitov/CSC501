@@ -35,7 +35,7 @@ void *thread_body(void *x)
     fprintf(stderr, "%d: created\n", (int)syscall(SYS_gettid));
     pthread_spin_unlock(&lock);
 
-    while (total < 1000000000)
+    while (total < 20000000000)
     {
         // calculate some dumb numbers here.
         for (i = 0; i < 1000000; i++)
