@@ -91,7 +91,7 @@ static struct container * get_container(__u64 cid)
  * check only the first task in the list.
  * If the task does not exist, NULL is returned.
  */
-static struct task * get_task(__u64 pid)
+static struct task * get_running_task(__u64 pid)
 {
     struct container *container = NULL;
     struct task *task = NULL;
@@ -117,6 +117,27 @@ static struct task * get_next_task(struct task *task)
     list_move_tail(&task->list, &task->container->task_list);
     next_task = (struct task *) list_entry(task->container->task_list.next, struct task, list);
     return next_task;
+}
+
+/**
+ * Get the running task for a given pid of the process.
+ * Iterate through all the tasks in the container since this is unexpected 
+ * task called switch. If this is unexpected task that is running, it needs to 
+ * be put back to sleep.
+ * If the task does not exist, NULL is returned.
+ */
+static struct task * get_task(__u64 pid)
+{
+    struct container *container = NULL;
+    struct task *task = NULL;
+    list_for_each_entry(container, &container_list, list) {
+        list_for_each_entry(task, &container->task_list, list) {
+            if (task->pid == pid) {
+                return task;
+            }
+        }
+    }
+    return NULL;
 }
 
 /**
@@ -199,7 +220,7 @@ int processor_container_delete(struct processor_container_cmd __user *user_cmd)
 
     mutex_lock(&c_lock);
     /* Find a task by checking only first task of each container since first task in the task list of a container is always running task */
-    task = get_task(current->pid);
+    task = get_running_task(current->pid);
     if (!task) {
         ERROR("No such running task with PID: %d is found in existing containers.\n", current->pid);
         mutex_unlock(&c_lock);
@@ -334,11 +355,21 @@ int processor_container_switch(struct processor_container_cmd __user *user_cmd)
 
     /* Find a task by checking only first task of each container. 
      * First task in the task list of a container is always running task */
-    task = get_task(current->pid);
+    task = get_running_task(current->pid);
     if (!task) {
         ERROR("No such running task with PID: %d is found in existing containers.\n", current->pid);
-        mutex_unlock(&c_lock);
-        return EINVAL;
+        task = get_task(current->pid);
+        if (task) {
+            /* De-schedule unwanted task */
+            DEBUG("Unexpected running task is put to sleep: %d\n", task->pid);
+            set_current_state(TASK_INTERRUPTIBLE);
+            schedule();
+            DEBUG("Running task that was unexpected is awaken: %d\n", task->pid);
+        }
+        else {
+            mutex_unlock(&c_lock);
+            return EINVAL;
+        }
     }
 
     /* Get the next task in the same container and switch or 
