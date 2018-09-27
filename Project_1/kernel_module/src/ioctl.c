@@ -62,13 +62,12 @@ struct task {
     pid_t pid;
     struct task_struct *task_struct;
     struct container *container;
+    struct semaphore sleep_sem;
     struct list_head list;
 };
 
 struct mutex c_lock;
 struct list_head container_list;
-// DEFINE_MUTEX(lock);
-// LIST_HEAD(container_list);
 
 /**
  * Get the container with the given cid.
@@ -165,6 +164,7 @@ static struct task * create_task(struct container *container, struct task_struct
     task->pid = task_struct->pid;
     task->task_struct = task_struct;
     task->container = container;
+    sema_init(&task->sleep_sem, 0);
 
     /* Initialize task list head */
     INIT_LIST_HEAD(&task->list);
@@ -175,6 +175,29 @@ static struct task * create_task(struct container *container, struct task_struct
     DEBUG("Added task %llu:%d\n", container->cid, task->pid);
 
     return task;
+}
+
+/**
+ * Cause the current task to sleep by waiting on its semaphore
+ */
+static void sleep_current_task(struct task *task)
+{
+    if (task->pid == current->pid) {
+        DEBUG("Sleeping %d\n", task->pid);
+        down_killable(&task->sleep_sem);
+        DEBUG("Done sleeping %d\n", task->pid);
+    } else {
+        DEBUG("Unable to sleep: task:%d != current:%d\n", task->pid, current->pid);
+    }
+}
+
+/**
+ * Wake up sleeping task by signaling on its semaphore
+ */
+static void wake_up_task(struct task *task)
+{
+    DEBUG("Waking up task %d\n", task->pid);
+    up(&task->sleep_sem);
 }
 
 /**
@@ -218,7 +241,8 @@ int processor_container_delete(struct processor_container_cmd __user *user_cmd)
     /* Wake up next task only if next task exists; otherwise, find container that needs to be removed */
     if (next_task->pid != task->pid) {
         DEBUG("Next task found in the container CID: %llu. Attempt to wake up, TID: %d...\n", next_task->container->cid, next_task->pid);
-        while(wake_up_process(next_task->task_struct) == 0);
+        //while(wake_up_process(next_task->task_struct) == 0);
+        wake_up_task(next_task);
         DEBUG("Next task is awake, TID: %d\nAttempt to delete task...\n", next_task->pid);
     } else {
         DEBUG("Only single task in a container CID: %llu found with TID:%d. "
@@ -302,9 +326,14 @@ int processor_container_create(struct processor_container_cmd __user *user_cmd)
         /* This is not the first task in the container, put it to sleep */
         DEBUG("Putting new task to sleep: %llu:%d\n", task->container->cid, task->pid);
         /* De-schedule new task */
-        set_current_state(TASK_INTERRUPTIBLE);
-        schedule();
+        sleep_current_task(task);
+        //set_current_state(TASK_INTERRUPTIBLE);
+    	//mutex_unlock(&c_lock);
+        //schedule();
+        //mutex_lock(&c_lock);
+        //set_current_state(TASK_RUNNING);
     }
+    //mutex_unlock(&c_lock);
     
     return 0;
 }
@@ -355,14 +384,19 @@ int processor_container_switch(struct processor_container_cmd __user *user_cmd)
     if (next_task->pid != task->pid) {
         /* Move task to running state */
         DEBUG("Switching task: %d->%d\n", task->pid, next_task->pid);
-        while(wake_up_process(next_task->task_struct) == 0);
-        
+        //while(wake_up_process(next_task->task_struct) == 0);
+        wake_up_task(next_task);
         mutex_unlock(&c_lock);
-
+        
         /* De-schedule previous task */
-        set_current_state(TASK_INTERRUPTIBLE);
-        DEBUG("Sleeping: %d\n", task->pid);
-        schedule();
+        sleep_current_task(task);
+        //set_current_state(TASK_INTERRUPTIBLE);
+        //mutex_unlock(&c_lock);
+        //DEBUG("Sleeping: %d\n", task->pid);
+        //schedule();
+        //mutex_lock(&c_lock);
+        //set_current_state(TASK_RUNNING);
+        //mutex_unlock(&c_lock);
     } else {
         DEBUG("Only single task in a container %llu - do not switch\n", task->container->cid);
         mutex_unlock(&c_lock);
@@ -378,6 +412,7 @@ static void debug_print_task(struct task *task)
     } else {
         DEBUG("  TASK: %d\n", task->pid);
         DEBUG("    State: %d\n", (int)task->task_struct->state);
+        DEBUG("    Sleep Sem: %d\n", (int)task->sleep_sem.count);
     }
 }
 
