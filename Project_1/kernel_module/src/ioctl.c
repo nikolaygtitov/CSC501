@@ -50,8 +50,7 @@
 #include <linux/mutex.h>
 
 #define DEBUG(format, ...) printk(KERN_DEBUG "[pid:%d][csc501:%s:%d]: " format, current->pid, __func__, __LINE__, __VA_ARGS__)
-#define DBUF_LEN 8192
-#define D(str) strncat(dbuf, str, DBUF_LEN);
+#define ERROR(format, ...) printk(KERN_ERR "[pid:%d][csc501:%s:%d]: " format, current->pid, __func__, __LINE__, __VA_ARGS__)
 
 struct container {
     __u64 cid;
@@ -68,7 +67,6 @@ struct task {
 
 DEFINE_MUTEX(lock);
 LIST_HEAD(container_list);
-char dbuf[DBUF_LEN] = "\0";
 
 /**
  * Get the container with the given cid.
@@ -143,7 +141,7 @@ static struct container * create_container(__u64 cid)
     /* Add container to list */
     list_add_tail(&container->list, &container_list);
 
-    DEBUG("Created container %d\n", (unsigned) cid);
+    DEBUG("Created container %llu\n", cid);
 
     return container;
 }
@@ -172,7 +170,7 @@ static struct task * create_task(struct container *container, struct task_struct
     /* Add this new task next to currently running task to the task list of the container */
     list_add(&task->list, container->task_list.next);
 
-    DEBUG("Added task %d:%d\n", (unsigned) container->cid, (unsigned) task->pid);
+    DEBUG("Added task %llu:%d\n", container->cid, task->pid);
 
     return task;
 }
@@ -193,62 +191,49 @@ static struct task * create_task(struct container *container, struct task_struct
 int processor_container_delete(struct processor_container_cmd __user *user_cmd)
 {
     struct task *task, *next_task = NULL;
-    struct processor_container_cmd cmd;
 
     DEBUG("Called delete: pid:%d\n", current->pid);
 
-    /* Copy user data to kernel */
-    if (copy_from_user(&cmd, (void *) user_cmd, sizeof(struct processor_container_cmd))) {
-        printk(KERN_ERR "Copy from user of the user_cmd failure on PID: %d.\n", (unsigned) current->pid);
-        return -EFAULT;
-    }
-
     mutex_lock(&lock);
-    DEBUG("Attempt to find a task by checking first task of each container: CID:%d, PID:%d...\n", (unsigned) cmd.cid, current->pid);
     /* Find a task by checking only first task of each container since first task in the task list of a container is always running task */
     task = get_task(current->pid);
     if (!task) {
-        printk(KERN_ERR "No such running task with PID: %d is found in existing containers.\n", (unsigned) current->pid);
+        ERROR("No such running task with PID: %d is found in existing containers.\n", current->pid);
         mutex_unlock(&lock);
         return EINVAL;
     }
     
-    DEBUG("Task found, TID: %d.\nAttempt to wake up next task...\n", (unsigned) task->pid);
-    
     next_task = get_next_task(task);
     if (!next_task) {
-        printk(KERN_ERR "Next task NOT found due to incorrect list operation. "
-               "Current task with TID: %d in container CID: %d cannot have "
-               "next task as NULL.\n", (unsigned) task->pid, (unsigned) cmd.cid);
+        ERROR("Next task NOT found due to incorrect list operation. "
+              "Current task with TID: %d in container CID: %llu cannot have "
+              "next task as NULL.\n", task->pid, task->container->cid);
         mutex_unlock(&lock);
         return EINVAL;
     }
 
     /* Wake up next task only if next task exists; otherwise, find container that needs to be removed */
     if (next_task->pid != task->pid) {
-        DEBUG("Next task found in the container CID: %d. Attempt to wake up, TID: %d...\n", (unsigned) cmd.cid, (unsigned) next_task->pid);
+        DEBUG("Next task found in the container CID: %llu. Attempt to wake up, TID: %d...\n", next_task->container->cid, next_task->pid);
         while(wake_up_process(next_task->task_struct) == 0);
-        DEBUG("Next task is awaken, TID: %d\nAttempt to delete task...\n", (unsigned) next_task->pid);
+        DEBUG("Next task is awake, TID: %d\nAttempt to delete task...\n", next_task->pid);
     } else {
-        DEBUG("Only single task in a container CID: %d found with TID:%d. "
+        DEBUG("Only single task in a container CID: %llu found with TID:%d. "
                 "There is no next task. Attempt to find a container...\n", 
-                (unsigned) cmd.cid, task->pid);
+                task->container->cid, task->pid);
     }
 
     /* Delete the task from the container */
-    DEBUG("Deleting task from container, CID: %d, TID: %d\n", (unsigned) cmd.cid, (unsigned) task->pid);
     list_del(&task->list);
-    DEBUG("Deleted task: %d\n", (unsigned) task->pid);
+    DEBUG("Deleted task: %llu:%d\n", task->container->cid, task->pid);
 
     /* Free task */
-    DEBUG("Freeing task, TID: %d\n", (unsigned) task->pid);
     kfree(task);
     
     /* If container does not have anymore tasks in it, remove container */
     if (list_empty(&task->container->task_list)) {
-        DEBUG("Container does not have anymore tasks in it - remove it, CID: %d\n", (unsigned) task->container->cid);
         list_del(&task->container->list);
-        DEBUG("Deleted container: %d\n", (unsigned) task->container->cid);
+        DEBUG("Deleted container: %llu\n", task->container->cid);
         kfree(task->container);
     }
     mutex_unlock(&lock);
@@ -281,7 +266,7 @@ int processor_container_create(struct processor_container_cmd __user *user_cmd)
 
     /* Copy user data to kernel */
     if (copy_from_user(&cmd, (void *) user_cmd, sizeof(struct processor_container_cmd))) {
-        printk(KERN_ERR "Copy from user of the user_cmd failure on PID: %d.\n", (unsigned) current->pid);
+        ERROR("Copy from user of the user_cmd failure on PID: %d.\n", current->pid);
         return -EFAULT;
     }
 
@@ -291,21 +276,20 @@ int processor_container_create(struct processor_container_cmd __user *user_cmd)
     container = get_container(cmd.cid);
     if (!container) {
         /* Could not find container in list - create it */
-        DEBUG("Container not found, CID: %d. Attempt to create new container...\n", (unsigned) cmd.cid);
+        DEBUG("Container not found, CID: %llu. Attempt to create new container...\n", cmd.cid);
         container = create_container(cmd.cid);
         if (!container) {
-            printk(KERN_ERR "Unable to create container.\n");
+            ERROR("Unable to create container %llu.\n", cmd.cid);
             mutex_unlock(&lock);
             return EINVAL;
         }
         is_new_container = true;
-        DEBUG("Container is created, CID: %d. Attempt to create new task...\n", (unsigned) cmd.cid);
     }
 
     /* Create task */
     task = create_task(container, current);
     if (!task) {
-        printk(KERN_ERR "Unable to create task.\n");
+        ERROR("Unable to create task %d.\n", current->pid);
         mutex_unlock(&lock);
         return EINVAL;
     }
@@ -313,8 +297,7 @@ int processor_container_create(struct processor_container_cmd __user *user_cmd)
     mutex_unlock(&lock);
     if (!is_new_container) {
         /* This is not the first task in the container, put it to sleep */
-        DEBUG("Additional task is created and stored in the task list of the existing container, CID: %d, TID: %d.\n"
-                "Put this task to sleep.\n", (unsigned) cmd.cid, (unsigned) task->pid);
+        DEBUG("Putting new task to sleep: %llu:%d\n", task->container->cid, task->pid);
         /* De-schedule new task */
         set_current_state(TASK_INTERRUPTIBLE);
         schedule();
@@ -340,50 +323,35 @@ int processor_container_create(struct processor_container_cmd __user *user_cmd)
 int processor_container_switch(struct processor_container_cmd __user *user_cmd)
 {
     struct task *task, *next_task = NULL;
-    struct processor_container_cmd cmd;
 
     DEBUG("Called switch, pid:%d.\n", current->pid);
 
-    /* Copy user data to kernel */
-    if (copy_from_user(&cmd, (void *) user_cmd, sizeof(struct processor_container_cmd))) {
-        printk(KERN_ERR "Copy from user of the user_cmd failure on PID: %d.\n", (unsigned) current->pid);
-        return -EFAULT;
-    }
-
     mutex_lock(&lock);
-
-    DEBUG("Called switch(%d), pid:%d\n", (unsigned) cmd.cid, current->pid);
 
     /* Find a task by checking only first task of each container. 
      * First task in the task list of a container is always running task */
     task = get_task(current->pid);
     if (!task) {
-        printk(KERN_ERR "No such running task with PID: %d is found in existing containers.\n", (unsigned) current->pid);
+        ERROR("No such running task with PID: %d is found in existing containers.\n", current->pid);
         mutex_unlock(&lock);
         return EINVAL;
     }
 
-    DEBUG("Task found, TID: %d.\nAttempt to schedule next task...\n", (unsigned) task->pid);
-    
     /* Get the next task in the same container and switch or 
      * if there are no more tasks in the container do not switch */
     next_task = get_next_task(task);
     if (!next_task) {
-        printk(KERN_ERR "Next task NOT found due to incorrect list operation. "
-               "Current task with TID: %d in container CID: %d cannot have "
-               "next task as NULL.\n", (unsigned) task->pid, (unsigned) cmd.cid);
+        ERROR("Next task NOT found due to incorrect list operation. "
+              "Current task with TID: %d in container CID: %llu cannot have "
+              "next task as NULL.\n", task->pid, task->container->cid);
         mutex_unlock(&lock);
         return EINVAL;
     }
 
     if (next_task->pid != task->pid) {
-        DEBUG("Next task found in container CID: %d. Attempt to perform switch, TID:%d->TID:%d...\n", 
-              (unsigned) cmd.cid, (unsigned) task->pid, (unsigned) next_task->pid);
-        
         /* Move task to running state */
         DEBUG("Switching task: %d->%d\n", task->pid, next_task->pid);
         while(wake_up_process(next_task->task_struct) == 0);
-        DEBUG("Switch is successful: %d->%d\n", task->pid, next_task->pid);
         
         mutex_unlock(&lock);
 
@@ -392,8 +360,7 @@ int processor_container_switch(struct processor_container_cmd __user *user_cmd)
         DEBUG("Sleeping: %d\n", task->pid);
         schedule();
     } else {
-        DEBUG("Only single task in a container CID: %d found with TID: %d. "
-              "There is no next task.\nDo not switch.\n", (unsigned) cmd.cid, task->pid);
+        DEBUG("Only single task in a container %llu - do not switch\n", task->container->cid);
         mutex_unlock(&lock);
     }
 
@@ -413,7 +380,7 @@ static void debug_print_task(struct task *task)
 static void debug_print_container(struct container *container)
 {
     struct task *task = NULL;
-    DEBUG("CONTAINER: %d\n", (unsigned) container->cid);
+    DEBUG("CONTAINER: %llu\n", container->cid);
     /* Print container data */
     list_for_each_entry(task, &container->task_list, list) {
         debug_print_task(task);
@@ -440,9 +407,6 @@ int processor_container_debug(struct processor_container_cmd __user *user_cmd)
     list_for_each_entry(container, &container_list, list) {
         debug_print_container(container);
     }
-
-    D(";");
-    DEBUG("DBUF: %s\n", dbuf);
 
     /* Unlock if we successfully locked */
     if (locked) {
