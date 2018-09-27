@@ -359,6 +359,7 @@ int processor_container_switch(struct processor_container_cmd __user *user_cmd)
     if (!task) {
         ERROR("No such running task with PID: %d is found in existing containers.\n", current->pid);
         task = get_task(current->pid);
+        mutex_unlock(&c_lock);
         if (task) {
             /* De-schedule unwanted task */
             DEBUG("Unexpected running task is put to sleep: %d\n", task->pid);
@@ -366,10 +367,7 @@ int processor_container_switch(struct processor_container_cmd __user *user_cmd)
             schedule();
             DEBUG("Running task that was unexpected is awaken: %d\n", task->pid);
         }
-        else {
-            mutex_unlock(&c_lock);
-            return EINVAL;
-        }
+        return EINVAL;
     }
 
     /* Get the next task in the same container and switch or 
