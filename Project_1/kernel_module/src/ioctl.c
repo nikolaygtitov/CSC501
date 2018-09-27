@@ -65,8 +65,10 @@ struct task {
     struct list_head list;
 };
 
-DEFINE_MUTEX(lock);
-LIST_HEAD(container_list);
+struct mutex c_lock;
+struct list_head container_list;
+// DEFINE_MUTEX(lock);
+// LIST_HEAD(container_list);
 
 /**
  * Get the container with the given cid.
@@ -195,12 +197,12 @@ int processor_container_delete(struct processor_container_cmd __user *user_cmd)
 
     DEBUG("Called delete: pid:%d\n", current->pid);
 
-    mutex_lock(&lock);
+    mutex_lock(&c_lock);
     /* Find a task by checking only first task of each container since first task in the task list of a container is always running task */
     task = get_task(current->pid);
     if (!task) {
         ERROR("No such running task with PID: %d is found in existing containers.\n", current->pid);
-        mutex_unlock(&lock);
+        mutex_unlock(&c_lock);
         return EINVAL;
     }
     
@@ -209,7 +211,7 @@ int processor_container_delete(struct processor_container_cmd __user *user_cmd)
         ERROR("Next task NOT found due to incorrect list operation. "
               "Current task with TID: %d in container CID: %llu cannot have "
               "next task as NULL.\n", task->pid, task->container->cid);
-        mutex_unlock(&lock);
+        mutex_unlock(&c_lock);
         return EINVAL;
     }
 
@@ -237,7 +239,7 @@ int processor_container_delete(struct processor_container_cmd __user *user_cmd)
         DEBUG("Deleted container: %llu\n", task->container->cid);
         kfree(task->container);
     }
-    mutex_unlock(&lock);
+    mutex_unlock(&c_lock);
     return 0;
 }
 
@@ -271,7 +273,7 @@ int processor_container_create(struct processor_container_cmd __user *user_cmd)
         return -EFAULT;
     }
 
-    mutex_lock(&lock);
+    mutex_lock(&c_lock);
 
     /* Find container with given cid */
     container = get_container(cmd.cid);
@@ -281,7 +283,7 @@ int processor_container_create(struct processor_container_cmd __user *user_cmd)
         container = create_container(cmd.cid);
         if (!container) {
             ERROR("Unable to create container %llu.\n", cmd.cid);
-            mutex_unlock(&lock);
+            mutex_unlock(&c_lock);
             return EINVAL;
         }
         is_new_container = true;
@@ -291,11 +293,11 @@ int processor_container_create(struct processor_container_cmd __user *user_cmd)
     task = create_task(container, current);
     if (!task) {
         ERROR("Unable to create task %d.\n", current->pid);
-        mutex_unlock(&lock);
+        mutex_unlock(&c_lock);
         return EINVAL;
     }
 
-    mutex_unlock(&lock);
+    mutex_unlock(&c_lock);
     if (!is_new_container) {
         /* This is not the first task in the container, put it to sleep */
         DEBUG("Putting new task to sleep: %llu:%d\n", task->container->cid, task->pid);
@@ -328,14 +330,14 @@ int processor_container_switch(struct processor_container_cmd __user *user_cmd)
 
     DEBUG("Called switch, pid:%d.\n", current->pid);
 
-    mutex_lock(&lock);
+    mutex_lock(&c_lock);
 
     /* Find a task by checking only first task of each container. 
      * First task in the task list of a container is always running task */
     task = get_task(current->pid);
     if (!task) {
         ERROR("No such running task with PID: %d is found in existing containers.\n", current->pid);
-        mutex_unlock(&lock);
+        mutex_unlock(&c_lock);
         return EINVAL;
     }
 
@@ -346,7 +348,7 @@ int processor_container_switch(struct processor_container_cmd __user *user_cmd)
         ERROR("Next task NOT found due to incorrect list operation. "
               "Current task with TID: %d in container CID: %llu cannot have "
               "next task as NULL.\n", task->pid, task->container->cid);
-        mutex_unlock(&lock);
+        mutex_unlock(&c_lock);
         return EINVAL;
     }
 
@@ -355,7 +357,7 @@ int processor_container_switch(struct processor_container_cmd __user *user_cmd)
         DEBUG("Switching task: %d->%d\n", task->pid, next_task->pid);
         while(wake_up_process(next_task->task_struct) == 0);
         
-        mutex_unlock(&lock);
+        mutex_unlock(&c_lock);
 
         /* De-schedule previous task */
         set_current_state(TASK_INTERRUPTIBLE);
@@ -363,7 +365,7 @@ int processor_container_switch(struct processor_container_cmd __user *user_cmd)
         schedule();
     } else {
         DEBUG("Only single task in a container %llu - do not switch\n", task->container->cid);
-        mutex_unlock(&lock);
+        mutex_unlock(&c_lock);
     }
 
     return 0;
@@ -398,11 +400,11 @@ int processor_container_debug(struct processor_container_cmd __user *user_cmd)
     struct container *container = NULL;
 
     /* Print mutex state and lock if possible - don't bother if someone is holding the lock */
-    locked = mutex_trylock(&lock);
+    locked = mutex_trylock(&c_lock);
     if (!locked) {
-        DEBUG("Unable to acquire mutex: %p\n", &lock);
+        DEBUG("Unable to acquire mutex: %p\n", &c_lock);
     } else {
-        DEBUG("Mutex acquired: %p\n", &lock);
+        DEBUG("Mutex acquired: %p\n", &c_lock);
     }
 
     /* Print container data */
@@ -412,8 +414,8 @@ int processor_container_debug(struct processor_container_cmd __user *user_cmd)
 
     /* Unlock if we successfully locked */
     if (locked) {
-        mutex_unlock(&lock);
-        DEBUG("Mutex released: %p\n", &lock);
+        mutex_unlock(&c_lock);
+        DEBUG("Mutex released: %p\n", &c_lock);
     }
     return 0;
 }
