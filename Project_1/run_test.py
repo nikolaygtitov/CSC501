@@ -73,6 +73,8 @@ def print_color(color, str):
         str = u'\u001b[31m' + str
     elif color == 'green':
         str = u'\u001b[32m' + str
+    elif color == 'yellow':
+        str = u'\u001b[33m' + str
     print str + u'\u001b[0m'
 
 
@@ -118,14 +120,18 @@ if __name__ == '__main__':
 
             # Check percent processed for each task in container
             exp_processed_t = exp_processed_c / float(parser.get_number_of_tasks_for_container(cid))
+            exp_processed_t_act = act_processed_c / float(parser.get_number_of_tasks_for_container(cid))
             for tid in parser.iter_tasks_in_container(cid):
                 act_processed_t = parser.get_processed_for_task(tid)
                 pct_error_processed_t = abs((act_processed_t - exp_processed_t) / exp_processed_t) * 100
+                pct_error_processed_t_act = abs((act_processed_t - exp_processed_t_act) / exp_processed_t_act) * 100
                 if pct_error_processed_t < 10:
                     col = 'green'
+                elif pct_error_processed_t_act < 10:
+                    col = 'yellow'
                 else:
                     col = 'red'
                     stop = True
-                print_color(col, '    Task %d: %d/%d => %d%%' % (tid, act_processed_t, exp_processed_t, pct_error_processed_t))
+                print_color(col, '    Task %d: %d/%d|%d => %d%%|%d%%' % (tid, act_processed_t, exp_processed_t, exp_processed_t_act, pct_error_processed_t, pct_error_processed_t_act))
 
         i += 1
