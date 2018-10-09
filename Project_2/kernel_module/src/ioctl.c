@@ -1,0 +1,444 @@
+// Project 2: Nathan Schnoor, nfschnoo; Nikolay Titov, ngtitov;
+
+//////////////////////////////////////////////////////////////////////
+//                      North Carolina State University
+//
+//
+//
+//                             Copyright 2018
+//
+////////////////////////////////////////////////////////////////////////
+//
+// This program is free software; you can redistribute it and/or modify it
+// under the terms and conditions of the GNU General Public License,
+// version 2, as published by the Free Software Foundation.
+//
+// This program is distributed in the hope it will be useful, but WITHOUT
+// ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+// FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+// more details.
+//
+// You should have received a copy of the GNU General Public License along with
+// this program; if not, write to the Free Software Foundation, Inc.,
+// 51 Franklin St - Fifth Floor, Boston, MA 02110-1301 USA.
+//
+////////////////////////////////////////////////////////////////////////
+//
+//   Author:  Hung-Wei Tseng, Yu-Chia Liu, Nathan Schnoor, Nikolay Titov
+//
+//   Description:
+//     Core of Kernel Module for Memory Container
+//
+////////////////////////////////////////////////////////////////////////
+
+#include "memory_container.h"
+
+#include <asm/uaccess.h>
+#include <linux/slab.h>
+#include <linux/kernel.h>
+#include <linux/errno.h>
+#include <linux/mm.h>
+#include <linux/fs.h>
+#include <linux/miscdevice.h>
+#include <linux/module.h>
+#include <linux/moduleparam.h>
+#include <linux/poll.h>
+#include <linux/mutex.h>
+#include <linux/sched.h>
+#include <linux/kthread.h>
+
+#define PCONTAINER_IOCTL_DEBUG _IOWR('N', 0x48, struct memory_container_cmd)
+#define DEBUG(format, ...) printk(KERN_DEBUG "[pid:%d][csc501:%s:%d]: " format, current->pid, __func__, __LINE__, __VA_ARGS__)
+#define ERROR(format, ...) printk(KERN_ERR "[pid:%d][csc501:%s:%d]: " format, current->pid, __func__, __LINE__, __VA_ARGS__)
+
+struct container {
+    __u64 cid;
+    struct list_head list;
+    struct list_head task_list;
+    struct vm_area_struct *vma;
+};
+
+struct task {
+    pid_t pid;
+    struct task_struct *task_struct;
+    struct container *container;
+    struct list_head list;
+};
+
+struct mutex c_lock;
+struct list_head container_list;
+
+
+/**
+ * Get the container with the given cid.
+ * If the container does not exist, NULL is returned.
+ */
+static struct container * get_container(__u64 cid)
+{
+    struct container *container = NULL;
+    list_for_each_entry(container, &container_list, list) {
+        if (container->cid == cid) {
+            return container;
+        }
+    }
+    return NULL;
+}
+
+/**
+ * Get the task for a given pid of the process. Since the running task of each 
+ * container is the first task in the list, iterate through containers and 
+ * check only the first task in the list.
+ * If the task does not exist, NULL is returned.
+ */
+static struct task * get_running_task(__u64 pid)
+{
+    struct container *container = NULL;
+    struct task *task = NULL;
+    list_for_each_entry(container, &container_list, list) {
+        task = (struct task *) list_entry(container->task_list.next, struct task, list);
+        if (task->pid == pid) {
+            return task;
+        }
+    }
+    return NULL;
+}
+
+/**
+ * Find next task to run within the same container. It moves the current task 
+ * to the end of the least, regardless if there are other tasks or not, and 
+ * gets the first task from the list, which is:
+ *     1) The next task that should be run
+ *     2) The same task that is already running
+ */
+static struct task * get_next_task(struct task *task)
+{
+    struct task *next_task = NULL;
+    list_move_tail(&task->list, &task->container->task_list);
+    next_task = (struct task *) list_entry(task->container->task_list.next, struct task, list);
+    return next_task;
+}
+
+/**
+ * Create a new container.
+ */
+static struct container * create_container(__u64 cid)
+{
+    struct container *container = NULL;
+
+    /* Allocate container */
+    container = (struct container *) kcalloc(1, sizeof(struct container), GFP_KERNEL);
+    if (!container) {
+        return NULL;
+    }
+
+    container->cid = cid;
+
+    /* Initialize container list head */
+    INIT_LIST_HEAD(&container->list);
+
+    /* Initialize task list head */
+    INIT_LIST_HEAD(&container->task_list);
+
+    /* Add container to list */
+    list_add_tail(&container->list, &container_list);
+
+    DEBUG("Created container %llu\n", cid);
+
+    return container;
+}
+
+/**
+ * Create task.
+ */
+static struct task * create_task(struct container *container, struct task_struct *task_struct)
+{
+    struct task *task = NULL;
+
+    /* Allocate task */
+    task = (struct task *) kcalloc(1, sizeof(struct task), GFP_KERNEL);
+    if (!task) {
+        return NULL;
+    }
+
+    /* Set task fields */
+    task->pid = task_struct->pid;
+    task->task_struct = task_struct;
+    task->container = container;
+
+    /* Initialize task list head */
+    INIT_LIST_HEAD(&task->list);
+
+    /* Add this new task next to currently running task to the task list of the container */
+    list_add(&task->list, container->task_list.next);
+
+    DEBUG("Added task %llu:%d\n", container->cid, task->pid);
+
+    return task;
+}
+
+int memory_container_mmap(struct file *filp, struct vm_area_struct *vma)
+{
+    return 0;
+}
+
+
+int memory_container_lock(struct memory_container_cmd __user *user_cmd)
+{
+    mutex_lock(&c_lock);
+    return 0;
+}
+
+
+int memory_container_unlock(struct memory_container_cmd __user *user_cmd)
+{
+    mutex_unlock(&c_lock);
+    return 0;
+}
+
+/**
+ * Delete the task in the container.
+ * 
+ * Finds currently running task based on pid. The first task in the task list of 
+ * the container is always a currently running task. Iterate over containers 
+ * and only check first tasks of each container.
+ * If the task is the only remaining task in the task list of the container, do 
+ * not wake up any other tasks, delete the task, and delete the container.
+ * Otherwise, find next task to run, wake up next task, and delete the current 
+ * task.
+ * 
+ * external functions needed:
+ * mutex_lock(), mutex_unlock(), wake_up_process(), 
+ */
+int memory_container_delete(struct memory_container_cmd __user *user_cmd)
+{
+    struct task *task, *next_task = NULL;
+
+    DEBUG("Called delete: pid:%d\n", current->pid);
+
+    mutex_lock(&c_lock);
+    /* Find a task by checking only first task of each container since first task in the task list of a container is always running task */
+    task = get_running_task(current->pid);
+    if (!task) {
+        ERROR("No such running task with PID: %d is found in existing containers.\n", current->pid);
+        mutex_unlock(&c_lock);
+        return EINVAL;
+    }
+    
+    next_task = get_next_task(task);
+    if (!next_task) {
+        ERROR("Next task NOT found due to incorrect list operation. "
+              "Current task with TID: %d in container CID: %llu cannot have "
+              "next task as NULL.\n", task->pid, task->container->cid);
+        mutex_unlock(&c_lock);
+        return EINVAL;
+    }
+
+    /* Wake up next task only if next task exists; otherwise, find container that needs to be removed */
+    if (next_task->pid != task->pid) {
+        DEBUG("Next task found in the container CID: %llu. Attempt to wake up, TID: %d...\n", next_task->container->cid, next_task->pid);
+        while(wake_up_process(next_task->task_struct) == 0);
+        DEBUG("Next task is awake, TID: %d\nAttempt to delete task...\n", next_task->pid);
+    } else {
+        DEBUG("Only single task in a container CID: %llu found with TID:%d. "
+                "There is no next task. Attempt to find a container...\n", 
+                task->container->cid, task->pid);
+    }
+
+    /* Delete the task from the container */
+    list_del(&task->list);
+    DEBUG("Deleted task: %llu:%d\n", task->container->cid, task->pid);
+
+    /* Free task */
+    kfree(task);
+    
+    /* If container does not have anymore tasks in it, remove container */
+    if (list_empty(&task->container->task_list)) {
+        list_del(&task->container->list);
+        DEBUG("Deleted container: %llu\n", task->container->cid);
+        kfree(task->container);
+    }
+    mutex_unlock(&c_lock);
+    return 0;
+}
+
+/**
+ * Create a task in the corresponding container.
+ * 
+ * Check if container already exists. If it does not exist, create new 
+ * container. 
+ * Create new task. Insert new task into the task list of the container.
+ * If new task is the only task in the container, let it run.
+ * Otherwise, put the newly created task to sleep.
+ * 
+ * external functions needed:
+ * copy_from_user(), mutex_lock(), mutex_unlock(), set_current_state(), schedule()
+ * 
+ * external variables needed:
+ * struct task_struct* current  
+ */
+int memory_container_create(struct memory_container_cmd __user *user_cmd)
+{
+    struct container *container = NULL;
+    struct task *task = NULL;
+    struct memory_container_cmd cmd;
+    bool is_new_container = false;
+
+    DEBUG("Called create, pid:%d.\n", current->pid);
+
+    /* Copy user data to kernel */
+    if (copy_from_user(&cmd, (void *) user_cmd, sizeof(struct memory_container_cmd))) {
+        ERROR("Copy from user of the user_cmd failure on PID: %d.\n", current->pid);
+        return -EFAULT;
+    }
+
+    mutex_lock(&c_lock);
+
+    /* Find container with given cid */
+    container = get_container(cmd.cid);
+    if (!container) {
+        /* Could not find container in list - create it */
+        DEBUG("Container not found, CID: %llu. Attempt to create new container...\n", cmd.cid);
+        container = create_container(cmd.cid);
+        if (!container) {
+            ERROR("Unable to create container %llu.\n", cmd.cid);
+            mutex_unlock(&c_lock);
+            return EINVAL;
+        }
+        is_new_container = true;
+    }
+
+    /* Create task */
+    task = create_task(container, current);
+    if (!task) {
+        ERROR("Unable to create task %d.\n", current->pid);
+        mutex_unlock(&c_lock);
+        return EINVAL;
+    }
+
+    mutex_unlock(&c_lock);
+    if (!is_new_container) {
+        /* This is not the first task in the container, put it to sleep */
+        DEBUG("Putting new task to sleep: %llu:%d\n", task->container->cid, task->pid);
+        /* De-schedule new task */
+        set_current_state(TASK_INTERRUPTIBLE);
+        schedule();
+    }
+    
+    return 0;
+}
+
+/**
+ * Free an object from memory container.
+ * 
+ * Finds a container based on the process id. If container is not found 
+ * corresponding error is returned.
+ * Frees an object that belongs to this container.
+ * 
+ * external functions needed:
+ * copy_from_user(), mutex_lock(), mutex_unlock(), kfree()
+ */
+int memory_container_free(struct memory_container_cmd __user *user_cmd)
+{
+    struct container *container = NULL;
+    struct memory_container_cmd cmd;
+
+    DEBUG("Called free, pid:%d.\n", current->pid);
+
+    /* Copy user data to kernel */
+    if (copy_from_user(&cmd, (void *) user_cmd, sizeof(struct memory_container_cmd))) {
+        ERROR("Copy from user of the user_cmd failure on PID: %d.\n", current->pid);
+        return -EFAULT;
+    }
+
+    mutex_lock(&c_lock);
+
+    /* Find container with given cid */
+    container = get_container(cmd.cid);
+    if (!container) {
+        /* Could not find container in list - cannot remove the object */
+        ERROR("Container does not exist, CID: %llu. Unable to remove an object/\n", cmd.cid);
+        mutex_unlock(&c_lock);
+        return EINVAL;
+    }
+    
+    DEBUG("Container is found, CID: %llu. Free an object.\n", cmd.cid);
+    /* Free object that belongs to the container */
+    kfree(container->vma);
+    mutex_unlock(&c_lock);
+    return 0;
+}
+
+static void debug_print_task(struct task *task)
+{
+    if (!task) {
+        DEBUG("  NULL%s\n", "");
+    } else {
+        DEBUG("  TASK: %d\n", task->pid);
+        DEBUG("    State: %d\n", (int)task->task_struct->state);
+    }
+}
+
+static void debug_print_container(struct container *container)
+{
+    struct task *task = NULL;
+    DEBUG("CONTAINER: %llu\n", container->cid);
+    /* Print container data */
+    list_for_each_entry(task, &container->task_list, list) {
+        debug_print_task(task);
+    }
+}
+
+/**
+ * Print debug information
+ */
+int memory_container_debug(struct memory_container_cmd __user *user_cmd)
+{
+    int locked = 0;
+    struct container *container = NULL;
+
+    /* Print mutex state and lock if possible - don't bother if someone is holding the lock */
+    locked = mutex_trylock(&c_lock);
+    if (!locked) {
+        DEBUG("Unable to acquire mutex: %p\n", &c_lock);
+    } else {
+        DEBUG("Mutex acquired: %p\n", &c_lock);
+    }
+
+    /* Print container data */
+    list_for_each_entry(container, &container_list, list) {
+        debug_print_container(container);
+    }
+
+    /* Unlock if we successfully locked */
+    if (locked) {
+        mutex_unlock(&c_lock);
+        DEBUG("Mutex released: %p\n", &c_lock);
+    }
+    return 0;
+}
+
+/**
+ * control function that receive the command in user space and pass arguments to
+ * corresponding functions.
+ */
+int memory_container_ioctl(struct file *filp, unsigned int cmd,
+                              unsigned long arg)
+{
+    switch (cmd)
+    {
+    case MCONTAINER_IOCTL_CREATE:
+        return memory_container_create((void __user *)arg);
+    case MCONTAINER_IOCTL_DELETE:
+        return memory_container_delete((void __user *)arg);
+    case MCONTAINER_IOCTL_LOCK:
+        return memory_container_lock((void __user *)arg);
+    case MCONTAINER_IOCTL_UNLOCK:
+        return memory_container_unlock((void __user *)arg);
+    case MCONTAINER_IOCTL_FREE:
+        return memory_container_free((void __user *)arg);
+    case PCONTAINER_IOCTL_DEBUG:
+        return memory_container_debug((void __user *)arg);
+    default:
+        return -ENOTTY;
+    }
+}
