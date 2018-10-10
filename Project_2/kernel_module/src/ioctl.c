@@ -55,13 +55,20 @@ struct container {
     __u64 cid;
     struct list_head list;
     struct list_head task_list;
-    struct vm_area_struct *vma;
+    struct list_head object_list;
 };
 
 struct task {
     pid_t pid;
     struct task_struct *task_struct;
     struct container *container;
+    struct list_head list;
+};
+
+struct object {
+    __u64 oid;
+    char *shared_memory;
+    phys_addr_t p_addr;
     struct list_head list;
 };
 
@@ -119,6 +126,41 @@ static struct task * get_next_task(struct task *task)
 }
 
 /**
+ * Get the running task for a given pid of the process.
+ * Iterate through all the tasks in the container since this is unexpected 
+ * task called switch. If this is unexpected task that is running, it needs to 
+ * be put back to sleep.
+ * If the task does not exist, NULL is returned.
+ */
+static struct task * get_task(__u64 pid)
+{
+    struct container *container = NULL;
+    struct task *task = NULL;
+    list_for_each_entry(container, &container_list, list) {
+        list_for_each_entry(task, &container->task_list, list) {
+            if (task->pid == pid) {
+                return task;
+            }
+        }
+    }
+    return NULL;
+}
+
+/**
+ * Get the object for a given container and object id (oid).
+ */
+static struct object * get_object(struct container *container, __u64 oid)
+{
+    struct object *object = NULL;
+    list_for_each_entry(object, &container->object_list, list) {
+        if (object->oid == oid) {
+            return object;
+        }
+    }
+    return NULL;
+}
+
+/**
  * Create a new container.
  */
 static struct container * create_container(__u64 cid)
@@ -138,6 +180,9 @@ static struct container * create_container(__u64 cid)
 
     /* Initialize task list head */
     INIT_LIST_HEAD(&container->task_list);
+    
+    /* Initialize object list head */
+    INIT_LIST_HEAD(&container->object_list);
 
     /* Add container to list */
     list_add_tail(&container->list, &container_list);
@@ -176,8 +221,82 @@ static struct task * create_task(struct container *container, struct task_struct
     return task;
 }
 
+/**
+ * Create a VMM area memory object.
+ * 
+ * Insert the object into VMM area memory list of the memory container.
+ */
+static void create_object(struct container *container, struct vm_area_struct *vma)
+{
+    struct object *object = NULL;
+
+    /* Allocate object */
+    object = (struct object *) kcalloc(1, sizeof(struct object), GFP_KERNEL);
+    if (!object) {
+        return NULL;
+    }
+
+    /* Set object fields */
+    object->oid = vma->vm_pgoff;
+    /* Allocate requested size of the memory for object */
+    object->shared_memory = kmalloc(vma->vm_pgoff, GFP_KERNEL);
+    if (!object->requested_memory) {
+        return NULL;
+    }
+    /* Map virtual address to physical */
+    object->p_addr = virt_to_phys((void *) object->shared_memory);
+    
+    /* Initialize object list head */
+    INIT_LIST_HEAD(&object->list);
+
+    /* Add this new object to the end of the list of objects */
+    list_add_tail(&object->list, &container->object_list);
+    
+    DEBUG("Added object OID: %llu into container CID: %llu.\n", object->oid, object->container->cid);
+
+    return object;
+    
+}
+
 int memory_container_mmap(struct file *filp, struct vm_area_struct *vma)
 {
+    struct task *task = NULL;
+    struct object *object = NULL;
+
+    DEBUG("Called mmap, pid:%d.\n", current->pid);
+
+    /* Copy user data to kernel */
+    if (copy_from_user(&kernel_vma, (void *) vma, sizeof(struct vm_area_struct))) {
+        ERROR("Copy from user of the vma failure on PID: %d.\n", current->pid);
+        return -EFAULT;
+    }
+    
+    task = get_task(current->pid);
+    if (!task) {
+        ERROR("No such running task with PID: %d is found in existing containers.\n", current->pid);
+        return ESRCH;
+    }
+    
+    /* Find an object for a given container and object id */
+    object = get_object(task->container, kernel_vma.vm_pgoff);
+    
+    if (!object) {
+        /* Could not find object in the given container - create new object */
+        DEBUG("No such object OID: %llu in the container CID: %llu. Attempt to create new object...\n", kernel_vma.vm_pgoff, task->container->cid);
+        object = create_object(container, &kernel_vma);
+        if (!object) {
+            ERROR("Unable to create object OID: %llu in the container CID: %llu -> PID: %d due to memory allocation issues.\n", kernel_vma.vm_pgoff, task->container->cid, task->pid);
+            return ENOMEM;
+        }
+    }
+    
+    /* Remap kernel memory into the user-space */
+    if (remap_pfn_range(vma, vma->vm_start, object->p_addr, object->oid, object->vma->vm_page_prot) != 0) {
+        ERROR("Failed: Unable to remap kernel memory into the user space; CID: %llu -> PID: %d -> OID: %llu due to memory allocation issues.\n", task->container->cid, task->pid, object->oid);
+        return EADDRNOTAVAIL;
+    }
+    
+    DEBUG("Success: Request to remap kernel space memory into the user-space memory; CID: %llu -> PID: %d -> OID: %llu.\n", task->container->cid, task->pid, object->oid);
     return 0;
 }
 
@@ -221,7 +340,7 @@ int memory_container_delete(struct memory_container_cmd __user *user_cmd)
     if (!task) {
         ERROR("No such running task with PID: %d is found in existing containers.\n", current->pid);
         mutex_unlock(&c_lock);
-        return EINVAL;
+        return ESRCH;
     }
     
     next_task = get_next_task(task);
@@ -230,7 +349,7 @@ int memory_container_delete(struct memory_container_cmd __user *user_cmd)
               "Current task with TID: %d in container CID: %llu cannot have "
               "next task as NULL.\n", task->pid, task->container->cid);
         mutex_unlock(&c_lock);
-        return EINVAL;
+        return ENOEXEC;
     }
 
     /* Wake up next task only if next task exists; otherwise, find container that needs to be removed */
@@ -239,24 +358,24 @@ int memory_container_delete(struct memory_container_cmd __user *user_cmd)
         while(wake_up_process(next_task->task_struct) == 0);
         DEBUG("Next task is awake, TID: %d\nAttempt to delete task...\n", next_task->pid);
     } else {
-        DEBUG("Only single task in a container CID: %llu found with TID:%d. "
-                "There is no next task. Attempt to find a container...\n", 
-                task->container->cid, task->pid);
+        DEBUG("Only single task in a container CID: %llu found with TID:%d. There is no next task...\n", task->container->cid, task->pid);
     }
 
     /* Delete the task from the container */
     list_del(&task->list);
-    DEBUG("Deleted task: %llu:%d\n", task->container->cid, task->pid);
-
-    /* Free task */
-    kfree(task);
+    DEBUG("Deleted task: CID: %llu -> PID: %d. Attempt to free task...\n", task->container->cid, task->pid);
     
-    /* If container does not have anymore tasks in it, remove container */
-    if (list_empty(&task->container->task_list)) {
+    /* If container does not have anymore tasks and objects in it, remove container */
+    if (list_empty(&task->container->task_list) && list_empty(&task->container->object_list)) {
         list_del(&task->container->list);
-        DEBUG("Deleted container: %llu\n", task->container->cid);
+        DEBUG("Container does not have anymore tasks nor objects. Deleted container from the list: %llu\n", task->container->cid);
         kfree(task->container);
     }
+    
+    /* Free task */
+    DEBUG("Freeing task: CID: %llu -> PID: %d.\n", task->container->cid, task->pid);
+    kfree(task);
+    
     mutex_unlock(&c_lock);
     return 0;
 }
@@ -302,7 +421,7 @@ int memory_container_create(struct memory_container_cmd __user *user_cmd)
         if (!container) {
             ERROR("Unable to create container %llu.\n", cmd.cid);
             mutex_unlock(&c_lock);
-            return EINVAL;
+            return ENOMEM;
         }
         is_new_container = true;
     }
@@ -312,7 +431,7 @@ int memory_container_create(struct memory_container_cmd __user *user_cmd)
     if (!task) {
         ERROR("Unable to create task %d.\n", current->pid);
         mutex_unlock(&c_lock);
-        return EINVAL;
+        return ENOMEM;
     }
 
     mutex_unlock(&c_lock);
@@ -340,6 +459,7 @@ int memory_container_create(struct memory_container_cmd __user *user_cmd)
 int memory_container_free(struct memory_container_cmd __user *user_cmd)
 {
     struct container *container = NULL;
+    struct object *object = NULL;
     struct memory_container_cmd cmd;
 
     DEBUG("Called free, pid:%d.\n", current->pid);
@@ -350,21 +470,41 @@ int memory_container_free(struct memory_container_cmd __user *user_cmd)
         return -EFAULT;
     }
 
-    mutex_lock(&c_lock);
-
-    /* Find container with given cid */
+    /* Find container with a given cid */
     container = get_container(cmd.cid);
     if (!container) {
         /* Could not find container in list - cannot remove the object */
-        ERROR("Container does not exist, CID: %llu. Unable to remove an object/\n", cmd.cid);
-        mutex_unlock(&c_lock);
-        return EINVAL;
+        ERROR("Container does not exist, CID: %llu, unable to remove an object, OID: %llu.\n", cmd.cid, cmd.oid);
+        return ENXIO;
     }
     
-    DEBUG("Container is found, CID: %llu. Free an object.\n", cmd.cid);
-    /* Free object that belongs to the container */
-    kfree(container->vma);
-    mutex_unlock(&c_lock);
+    DEBUG("Container is found, CID: %llu. Attempt to find object, OID: %%llu.\n", container->cid, cmd.oid);
+    
+    /* Find object with a given container and iod */
+    object = get_object(container, cmd.oid);
+    if (!object) {
+        /* Could not find object in the list for a given container - cannot remove the object */
+        ERROR("Unable to find object, OID: %llu in the container, CID: %llu; Will not remove object.\n", cmd.oid, container->cid);
+        return ENXIO;
+    }
+    
+    DEBUG("Object is found in the container, CID: %llu -> OID: %llu. Attempt to delete an object...\n", container->cid, object->oid);
+    
+    /* Delete the object from the container */
+    list_del(&object->list);
+    DEBUG("Deleted object in the container: CID: %llu -> OID: %llu. Freeing an object...\n", container->cid, object->oid);
+    
+    /* Free the object */
+    kfree(object->shared_memory);
+    kfree(object);
+    
+    /* If container does not have anymore tasks and objects in it, remove container */
+    if (list_empty(&container->task_list) && list_empty(&container->object_list)) {
+        list_del(&container->list);
+        DEBUG("Container does not have anymore tasks nor objects. Deleted container from the list: %llu. Freeing container...\n", container->cid);
+        kfree(container);
+    }
+    
     return 0;
 }
 
