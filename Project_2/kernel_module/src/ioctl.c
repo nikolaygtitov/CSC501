@@ -78,6 +78,7 @@ struct list_head container_list;
 
 /**
  * Get the container with the given cid.
+ * 
  * If the container does not exist, NULL is returned.
  */
 static struct container * get_container(__u64 cid)
@@ -92,9 +93,10 @@ static struct container * get_container(__u64 cid)
 }
 
 /**
- * Get the task for a given pid of the process. Since the running task of each 
- * container is the first task in the list, iterate through containers and 
- * check only the first task in the list.
+ * Get the task for a given pid of the process. 
+ * 
+ * Since the running task of each container is the first task in the list, 
+ * iterate through containers and check only the first task in the list.
  * If the task does not exist, NULL is returned.
  */
 static struct task * get_running_task(__u64 pid)
@@ -111,9 +113,10 @@ static struct task * get_running_task(__u64 pid)
 }
 
 /**
- * Find next task to run within the same container. It moves the current task 
- * to the end of the least, regardless if there are other tasks or not, and 
- * gets the first task from the list, which is:
+ * Find next task to run within the same container.
+ * 
+ * It moves the current task to the end of the least, regardless if there are 
+ * other tasks or not, and gets the first task from the list, which is:
  *     1) The next task that should be run
  *     2) The same task that is already running
  */
@@ -127,6 +130,7 @@ static struct task * get_next_task(struct task *task)
 
 /**
  * Get the running task for a given pid of the process.
+ * 
  * Iterate through all the tasks in the container since this is unexpected 
  * task called switch. If this is unexpected task that is running, it needs to 
  * be put back to sleep.
@@ -224,7 +228,9 @@ static struct task * create_task(struct container *container, struct task_struct
 /**
  * Create a VMM area memory object.
  * 
- * Insert the object into VMM area memory list of the memory container.
+ * Allocate memory for the object and space for a shared memory. Set all of the 
+ * objects fields. Map virtual address to a physical. Insert the object into 
+ * VMM area memory list of the resource memory container.
  */
 static void create_object(struct container *container, struct vm_area_struct *vma)
 {
@@ -255,13 +261,26 @@ static void create_object(struct container *container, struct vm_area_struct *vm
     DEBUG("Added object OID: %llu into container CID: %llu.\n", object->oid, object->container->cid);
 
     return object;
-    
 }
 
+/*
+ * Request to remap kernel space memory into the user-space memory.
+ * 
+ * The kernel module takes an offset from the user-space library as vm area 
+ * struct and allocates shared memory with the size associated with the offset. 
+ * The offset is considered to be an object id (oid). If an object associated 
+ * with an offset was already created/requested since the kernel module is 
+ * loaded, the mmap request should assign the address of the previously 
+ * allocated object to the mmap request. Hence, first it attempts to find an 
+ * existing object within a given container identified based on the current task 
+ * that initiated the mmap call. If such object is not found, create one.
+ * Lastly, remap kernel memory into the user-space.
+ */
 int memory_container_mmap(struct file *filp, struct vm_area_struct *vma)
 {
     struct task *task = NULL;
     struct object *object = NULL;
+    struct vm_area_struct kernel_vma;
 
     DEBUG("Called mmap, pid:%d.\n", current->pid);
 
@@ -300,14 +319,18 @@ int memory_container_mmap(struct file *filp, struct vm_area_struct *vma)
     return 0;
 }
 
-
+/*
+ * Mutex Lock.
+ */
 int memory_container_lock(struct memory_container_cmd __user *user_cmd)
 {
     mutex_lock(&c_lock);
     return 0;
 }
 
-
+/*
+ * Mutex Unlock.
+ */
 int memory_container_unlock(struct memory_container_cmd __user *user_cmd)
 {
     mutex_unlock(&c_lock);
