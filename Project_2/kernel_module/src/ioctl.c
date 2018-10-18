@@ -93,47 +93,10 @@ static struct container * get_container(__u64 cid)
 }
 
 /**
- * Get the task for a given pid of the process. 
- * 
- * Since the running task of each container is the first task in the list, 
- * iterate through containers and check only the first task in the list.
- * If the task does not exist, NULL is returned.
- */
-static struct task * get_running_task(__u64 pid)
-{
-    struct container *container = NULL;
-    struct task *task = NULL;
-    list_for_each_entry(container, &container_list, list) {
-        task = (struct task *) list_entry(container->task_list.next, struct task, list);
-        if (task->pid == pid) {
-            return task;
-        }
-    }
-    return NULL;
-}
-
-/**
- * Find next task to run within the same container.
- * 
- * It moves the current task to the end of the least, regardless if there are 
- * other tasks or not, and gets the first task from the list, which is:
- *     1) The next task that should be run
- *     2) The same task that is already running
- */
-static struct task * get_next_task(struct task *task)
-{
-    struct task *next_task = NULL;
-    list_move_tail(&task->list, &task->container->task_list);
-    next_task = (struct task *) list_entry(task->container->task_list.next, struct task, list);
-    return next_task;
-}
-
-/**
  * Get the running task for a given pid of the process.
  * 
- * Iterate through all the tasks in the container since this is unexpected 
- * task called switch. If this is unexpected task that is running, it needs to 
- * be put back to sleep.
+ * Iterate through all containers and all the tasks within each container to 
+ * find a task. 
  * If the task does not exist, NULL is returned.
  */
 static struct task * get_task(__u64 pid)
@@ -246,7 +209,7 @@ static void create_object(struct container *container, struct vm_area_struct *vm
     object->oid = vma->vm_pgoff;
     /* Allocate requested size of the memory for object */
     object->shared_memory = kmalloc(vma->vm_pgoff, GFP_KERNEL);
-    if (!object->requested_memory) {
+    if (!object->shared_memory) {
         return NULL;
     }
     /* Map virtual address to physical */
@@ -338,50 +301,30 @@ int memory_container_unlock(struct memory_container_cmd __user *user_cmd)
 }
 
 /**
- * Delete the task in the container.
+ * Delete the task from the container.
  * 
- * Finds currently running task based on pid. The first task in the task list of 
- * the container is always a currently running task. Iterate over containers 
- * and only check first tasks of each container.
- * If the task is the only remaining task in the task list of the container, do 
- * not wake up any other tasks, delete the task, and delete the container.
- * Otherwise, find next task to run, wake up next task, and delete the current 
- * task.
+ * Finds task based on pid by iterating through all containers and all the 
+ * tasks within each container.
+ * Deletes the task from the container.
+ * Deletes and frees container only if container does not have anymore tasks and
+ * objects in it.
  * 
  * external functions needed:
- * mutex_lock(), mutex_unlock(), wake_up_process(), 
+ * mutex_lock(), mutex_unlock()
  */
 int memory_container_delete(struct memory_container_cmd __user *user_cmd)
 {
-    struct task *task, *next_task = NULL;
+    struct task *task = NULL;
 
     DEBUG("Called delete: pid:%d\n", current->pid);
 
     mutex_lock(&c_lock);
-    /* Find a task by checking only first task of each container since first task in the task list of a container is always running task */
-    task = get_running_task(current->pid);
+    /* Find a task based on pid */
+    task = get_task(current->pid);
     if (!task) {
         ERROR("No such running task with PID: %d is found in existing containers.\n", current->pid);
         mutex_unlock(&c_lock);
         return ESRCH;
-    }
-    
-    next_task = get_next_task(task);
-    if (!next_task) {
-        ERROR("Next task NOT found due to incorrect list operation. "
-              "Current task with TID: %d in container CID: %llu cannot have "
-              "next task as NULL.\n", task->pid, task->container->cid);
-        mutex_unlock(&c_lock);
-        return ENOEXEC;
-    }
-
-    /* Wake up next task only if next task exists; otherwise, find container that needs to be removed */
-    if (next_task->pid != task->pid) {
-        DEBUG("Next task found in the container CID: %llu. Attempt to wake up, TID: %d...\n", next_task->container->cid, next_task->pid);
-        while(wake_up_process(next_task->task_struct) == 0);
-        DEBUG("Next task is awake, TID: %d\nAttempt to delete task...\n", next_task->pid);
-    } else {
-        DEBUG("Only single task in a container CID: %llu found with TID:%d. There is no next task...\n", task->container->cid, task->pid);
     }
 
     /* Delete the task from the container */
@@ -406,14 +349,11 @@ int memory_container_delete(struct memory_container_cmd __user *user_cmd)
 /**
  * Create a task in the corresponding container.
  * 
- * Check if container already exists. If it does not exist, create new 
- * container. 
+ * Check if container already exists. If it does not exist, create new container. 
  * Create new task. Insert new task into the task list of the container.
- * If new task is the only task in the container, let it run.
- * Otherwise, put the newly created task to sleep.
  * 
  * external functions needed:
- * copy_from_user(), mutex_lock(), mutex_unlock(), set_current_state(), schedule()
+ * copy_from_user(), mutex_lock(), mutex_unlock()
  * 
  * external variables needed:
  * struct task_struct* current  
@@ -423,7 +363,6 @@ int memory_container_create(struct memory_container_cmd __user *user_cmd)
     struct container *container = NULL;
     struct task *task = NULL;
     struct memory_container_cmd cmd;
-    bool is_new_container = false;
 
     DEBUG("Called create, pid:%d.\n", current->pid);
 
@@ -446,7 +385,6 @@ int memory_container_create(struct memory_container_cmd __user *user_cmd)
             mutex_unlock(&c_lock);
             return ENOMEM;
         }
-        is_new_container = true;
     }
 
     /* Create task */
@@ -458,13 +396,6 @@ int memory_container_create(struct memory_container_cmd __user *user_cmd)
     }
 
     mutex_unlock(&c_lock);
-    if (!is_new_container) {
-        /* This is not the first task in the container, put it to sleep */
-        DEBUG("Putting new task to sleep: %llu:%d\n", task->container->cid, task->pid);
-        /* De-schedule new task */
-        set_current_state(TASK_INTERRUPTIBLE);
-        schedule();
-    }
     
     return 0;
 }
@@ -475,6 +406,8 @@ int memory_container_create(struct memory_container_cmd __user *user_cmd)
  * Finds a container based on the process id. If container is not found 
  * corresponding error is returned.
  * Frees an object that belongs to this container.
+ * Deletes and frees container only if container does not have anymore tasks and
+ * objects in it.
  * 
  * external functions needed:
  * copy_from_user(), mutex_lock(), mutex_unlock(), kfree()
