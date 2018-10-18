@@ -47,7 +47,7 @@
 #include <linux/sched.h>
 #include <linux/kthread.h>
 
-#define PCONTAINER_IOCTL_DEBUG _IOWR('N', 0x48, struct memory_container_cmd)
+#define PCONTAINER_IOCTL_DEBUG _IOWR('N', 0x50, struct memory_container_cmd)
 #define DEBUG(format, ...) printk(KERN_DEBUG "[pid:%d][csc501:%s:%d]: " format, current->pid, __func__, __LINE__, __VA_ARGS__)
 #define ERROR(format, ...) printk(KERN_ERR "[pid:%d][csc501:%s:%d]: " format, current->pid, __func__, __LINE__, __VA_ARGS__)
 
@@ -69,6 +69,7 @@ struct object {
     __u64 oid;
     char *shared_memory;
     phys_addr_t p_addr;
+    struct mutex lock;
     struct list_head list;
 };
 
@@ -195,7 +196,7 @@ static struct task * create_task(struct container *container, struct task_struct
  * objects fields. Map virtual address to a physical. Insert the object into 
  * VMM area memory list of the resource memory container.
  */
-static void create_object(struct container *container, struct vm_area_struct *vma)
+static struct object * create_object(struct container *container, struct vm_area_struct *vma)
 {
     struct object *object = NULL;
 
@@ -214,6 +215,8 @@ static void create_object(struct container *container, struct vm_area_struct *vm
     }
     /* Map virtual address to physical */
     object->p_addr = virt_to_phys((void *) object->shared_memory);
+
+    mutex_init(&object->lock);
     
     /* Initialize object list head */
     INIT_LIST_HEAD(&object->list);
@@ -221,7 +224,7 @@ static void create_object(struct container *container, struct vm_area_struct *vm
     /* Add this new object to the end of the list of objects */
     list_add_tail(&object->list, &container->object_list);
     
-    DEBUG("Added object OID: %llu into container CID: %llu.\n", object->oid, object->container->cid);
+    DEBUG("Added object OID: %llu into container CID: %llu.\n", object->oid, container->cid);
 
     return object;
 }
@@ -252,10 +255,12 @@ int memory_container_mmap(struct file *filp, struct vm_area_struct *vma)
         ERROR("Copy from user of the vma failure on PID: %d.\n", current->pid);
         return -EFAULT;
     }
-    
+
+    mutex_lock(&c_lock);
     task = get_task(current->pid);
     if (!task) {
         ERROR("No such running task with PID: %d is found in existing containers.\n", current->pid);
+        mutex_unlock(&c_lock);
         return ESRCH;
     }
     
@@ -264,21 +269,24 @@ int memory_container_mmap(struct file *filp, struct vm_area_struct *vma)
     
     if (!object) {
         /* Could not find object in the given container - create new object */
-        DEBUG("No such object OID: %llu in the container CID: %llu. Attempt to create new object...\n", kernel_vma.vm_pgoff, task->container->cid);
-        object = create_object(container, &kernel_vma);
+        DEBUG("No such object OID: %lu in the container CID: %llu. Attempt to create new object...\n", kernel_vma.vm_pgoff, task->container->cid);
+        object = create_object(task->container, &kernel_vma);
         if (!object) {
-            ERROR("Unable to create object OID: %llu in the container CID: %llu -> PID: %d due to memory allocation issues.\n", kernel_vma.vm_pgoff, task->container->cid, task->pid);
+            ERROR("Unable to create object OID: %lu in the container CID: %llu -> PID: %d due to memory allocation issues.\n", kernel_vma.vm_pgoff, task->container->cid, task->pid);
+            mutex_unlock(&c_lock);
             return ENOMEM;
         }
     }
     
     /* Remap kernel memory into the user-space */
-    if (remap_pfn_range(vma, vma->vm_start, object->p_addr, object->oid, object->vma->vm_page_prot) != 0) {
+    if (remap_pfn_range(vma, vma->vm_start, object->p_addr, object->oid, vma->vm_page_prot) != 0) {
         ERROR("Failed: Unable to remap kernel memory into the user space; CID: %llu -> PID: %d -> OID: %llu due to memory allocation issues.\n", task->container->cid, task->pid, object->oid);
+        mutex_unlock(&c_lock);
         return EADDRNOTAVAIL;
     }
     
     DEBUG("Success: Request to remap kernel space memory into the user-space memory; CID: %llu -> PID: %d -> OID: %llu.\n", task->container->cid, task->pid, object->oid);
+    mutex_unlock(&c_lock);
     return 0;
 }
 
@@ -287,7 +295,37 @@ int memory_container_mmap(struct file *filp, struct vm_area_struct *vma)
  */
 int memory_container_lock(struct memory_container_cmd __user *user_cmd)
 {
+    struct task *task = NULL;
+    struct object *object = NULL;
+    struct memory_container_cmd cmd;
+
+    /* Copy user data to kernel */
+    if (copy_from_user(&cmd, (void *) user_cmd, sizeof(struct memory_container_cmd))) {
+        ERROR("Copy from user of the cmd on PID: %d.\n", current->pid);
+        return -EFAULT;
+    }
+
+    DEBUG("Called lock, oid:%llu\n", cmd.oid);
+    
     mutex_lock(&c_lock);
+    task = get_task(current->pid);
+    if (!task) {
+        ERROR("No such running task with PID: %d is found in existing containers.\n", current->pid);
+        mutex_unlock(&c_lock);
+        return ESRCH;
+    }
+    
+    /* Find an object for a given container and object id */
+    object = get_object(task->container, cmd.oid);
+    
+    if (!object) {
+        ERROR("No such object OID: %llu in the container CID: %llu.\n", cmd.oid, task->container->cid);
+        mutex_unlock(&c_lock);
+        return ESRCH;
+    }
+
+    mutex_lock(&object->lock);
+    mutex_unlock(&c_lock);
     return 0;
 }
 
@@ -296,6 +334,36 @@ int memory_container_lock(struct memory_container_cmd __user *user_cmd)
  */
 int memory_container_unlock(struct memory_container_cmd __user *user_cmd)
 {
+    struct task *task = NULL;
+    struct object *object = NULL;
+    struct memory_container_cmd cmd;
+
+    /* Copy user data to kernel */
+    if (copy_from_user(&cmd, (void *) user_cmd, sizeof(struct memory_container_cmd))) {
+        ERROR("Copy from user of the cmd on PID: %d.\n", current->pid);
+        return -EFAULT;
+    }
+
+    DEBUG("Called unlock, oid:%llu\n", cmd.oid);
+    
+    mutex_lock(&c_lock);
+    task = get_task(current->pid);
+    if (!task) {
+        ERROR("No such running task with PID: %d is found in existing containers.\n", current->pid);
+        mutex_unlock(&c_lock);
+        return ESRCH;
+    }
+    
+    /* Find an object for a given container and object id */
+    object = get_object(task->container, cmd.oid);
+    
+    if (!object) {
+        ERROR("No such object OID: %llu in the container CID: %llu.\n", cmd.oid, task->container->cid);
+        mutex_unlock(&c_lock);
+        return ESRCH;
+    }
+
+    mutex_unlock(&object->lock);
     mutex_unlock(&c_lock);
     return 0;
 }
@@ -426,21 +494,25 @@ int memory_container_free(struct memory_container_cmd __user *user_cmd)
         return -EFAULT;
     }
 
+    mutex_lock(&c_lock);
+
     /* Find container with a given cid */
     container = get_container(cmd.cid);
     if (!container) {
         /* Could not find container in list - cannot remove the object */
         ERROR("Container does not exist, CID: %llu, unable to remove an object, OID: %llu.\n", cmd.cid, cmd.oid);
+        mutex_unlock(&c_lock);
         return ENXIO;
     }
     
-    DEBUG("Container is found, CID: %llu. Attempt to find object, OID: %%llu.\n", container->cid, cmd.oid);
+    DEBUG("Container is found, CID: %llu. Attempt to find object, OID: %llu.\n", container->cid, cmd.oid);
     
     /* Find object with a given container and iod */
     object = get_object(container, cmd.oid);
     if (!object) {
         /* Could not find object in the list for a given container - cannot remove the object */
         ERROR("Unable to find object, OID: %llu in the container, CID: %llu; Will not remove object.\n", cmd.oid, container->cid);
+        mutex_unlock(&c_lock);
         return ENXIO;
     }
     
@@ -461,6 +533,7 @@ int memory_container_free(struct memory_container_cmd __user *user_cmd)
         kfree(container);
     }
     
+    mutex_unlock(&c_lock);
     return 0;
 }
 
