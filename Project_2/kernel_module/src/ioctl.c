@@ -68,7 +68,8 @@ struct task {
 struct object {
     __u64 oid;
     char *shared_memory;
-    phys_addr_t p_addr;
+    unsigned long size;
+    unsigned long pfn;
     struct mutex lock;
     struct list_head list;
 };
@@ -233,12 +234,13 @@ static struct object * create_object(struct container *container, struct vm_area
 static struct object * set_object_fields(struct object *object, struct vm_area_struct *vma)
 {
     /* Allocate requested size of the memory for object */
-    object->shared_memory = kmalloc((vma->vm_end - vma->vm_start), GFP_KERNEL);
+    object->size = (unsigned long) (vma->vm_end - vma->vm_start);
+    object->shared_memory = kmalloc(object->size, GFP_KERNEL);
     if (!object->shared_memory) {
         return NULL;
     }
     /* Map virtual address to physical */
-    object->p_addr = virt_to_phys((void *) object->shared_memory);
+    object->pfn = virt_to_phys((void *) object->shared_memory)>>PAGE_SHIFT;
     return object;
 }
 
@@ -311,8 +313,8 @@ int memory_container_mmap(struct file *filp, struct vm_area_struct *vma)
     DEBUG("Ready to call remap_pfn_range(): %llu\n", object->oid);
     
     /* Remap kernel memory into the user-space */
-    if (remap_pfn_range(vma, vma->vm_start, object->p_addr, object->oid, vma->vm_page_prot) != 0) {
-        ERROR("Failed: Unable to remap kernel memory into the user space; CID: %llu -> PID: %d -> OID: %llu due to memory allocation issues.\n", task->container->cid, task->pid, object->oid);
+    if (remap_pfn_range(vma, vma->vm_start, object->pfn, object->size, vma->vm_page_prot) != 0) {
+        ERROR("Failed: Unable to remap kernel memory into the user space; CID: %llu -> PID: %d -> OID: %llu.\n", task->container->cid, task->pid, object->oid);
         mutex_unlock(&c_lock);
         return EADDRNOTAVAIL;
     }
