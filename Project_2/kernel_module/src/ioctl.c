@@ -192,9 +192,10 @@ static struct task * create_task(struct container *container, struct task_struct
 /**
  * Create a VMM area memory object.
  * 
- * Allocate memory for the object and space for a shared memory. Set all of the 
- * objects fields. Map virtual address to a physical. Insert the object into 
- * VMM area memory list of the resource memory container.
+ * Allocate object and assign the object id. Initialize mutex lock and object 
+ * list head. Insert the object into VMM area memory list of the resource 
+ * memory container.
+ * If allocation of memory for object fails return NULL.
  */
 static struct object * create_object(struct container *container, struct vm_area_struct *vma)
 {
@@ -208,14 +209,6 @@ static struct object * create_object(struct container *container, struct vm_area
 
     /* Set object fields */
     object->oid = vma->vm_pgoff;
-
-    /* Allocate requested size of the memory for object */
-    /* object->shared_memory = kmalloc(vma->vm_pgoff, GFP_KERNEL);
-    if (!object->shared_memory) {
-        return NULL;
-    } */
-    /* Map virtual address to physical */
-    /* object->p_addr = virt_to_phys((void *) object->shared_memory); */
 
     mutex_init(&object->lock);
     
@@ -233,9 +226,9 @@ static struct object * create_object(struct container *container, struct vm_area
 /**
  * Set object fields.
  * 
- * Allocate memory for the object and space for a shared memory. Set all of the 
- * objects fields. Map virtual address to a physical. Insert the object into 
- * VMM area memory list of the resource memory container.
+ * Allocate memory for a shared memory. Set all of the objects fields. Map 
+ * virtual address to a physical.
+ * If allocation of shared memory fails return NULL.
  */
 static struct object * set_object_fields(struct object *object, struct vm_area_struct *vma)
 {
@@ -304,6 +297,7 @@ int memory_container_mmap(struct file *filp, struct vm_area_struct *vma)
     DEBUG("Found object: %llu\n", object->oid);
 
     if (!object->shared_memory) {
+        /* Shared memory for the object is not allocated yet even though object is created */
         DEBUG("Object shared memory is not alloc yet: %llu\n", object->oid);
         /* Set object fields */
         object = set_object_fields(object, vma);
@@ -330,6 +324,12 @@ int memory_container_mmap(struct file *filp, struct vm_area_struct *vma)
 
 /*
  * Mutex Lock.
+ * 
+ * Find a task and an object based on oid. If object is not found, it has not 
+ * been created yet. Create one by creating a dummy VMM memory area struct and 
+ * assigning its offset to the object id. After object is created free dummy 
+ * VMM memory area.
+ * Lock the object.
  */
 int memory_container_lock(struct memory_container_cmd __user *user_cmd)
 {
@@ -344,13 +344,11 @@ int memory_container_lock(struct memory_container_cmd __user *user_cmd)
         return -EFAULT;
     }
 
-    /* Allocate vma */
-    vma = (struct vm_area_struct *) kcalloc(1, sizeof(struct vm_area_struct), GFP_KERNEL);
-
-    DEBUG("Called lock, oid:%llu\n", cmd.oid);
+    DEBUG("Called lock, OID: %llu\n", cmd.oid);
     
     mutex_lock(&c_lock);
-    vma->vm_pgoff = cmd.oid;
+    
+    /* Get task */
     task = get_task(current->pid);
     if (!task) {
         ERROR("No such running task with PID: %d is found in existing containers.\n", current->pid);
@@ -362,13 +360,28 @@ int memory_container_lock(struct memory_container_cmd __user *user_cmd)
     object = get_object(task->container, cmd.oid);
     
     if (!object) {
-        ERROR("No such object OID: %llu in the container CID: %llu.\n", cmd.oid, task->container->cid);
+        /* There is no such object with oid, create one */
+        DEBUG("No such object OID: %llu in the container CID: %llu. Attempt to create an object ...\n", cmd.oid, task->container->cid);
+        
+        /* Allocate dummy vma just for initial creation of object */
+        vma = (struct vm_area_struct *) kcalloc(1, sizeof(struct vm_area_struct), GFP_KERNEL);
+        if (!vma) {
+            ERROR("Unable to create dummy VMM memory area struct for creating new object OID: %llu due to memory allocation issues.\n", cmd.oid);
+            mutex_unlock(&c_lock);
+            return ENOMEM;
+        }
+        vma->vm_pgoff = cmd.oid;
+        
+        /* Create new object */
         object = create_object(task->container, vma);
         if (!object) {
             ERROR("Unable to create object OID: %lu in the container CID: %llu -> PID: %d due to memory allocation issues.\n", vma->vm_pgoff, task->container->cid, task->pid);
             mutex_unlock(&c_lock);
             return ENOMEM;
         }
+        
+        /* Free dummy vma */
+        kfree(vma);
     }
 
     mutex_lock(&object->lock);
@@ -378,6 +391,10 @@ int memory_container_lock(struct memory_container_cmd __user *user_cmd)
 
 /*
  * Mutex Unlock.
+ * 
+ * Find a task and an object based on oid. If object is not found, there is an 
+ * error, exit.
+ * Unlock the object.
  */
 int memory_container_unlock(struct memory_container_cmd __user *user_cmd)
 {
