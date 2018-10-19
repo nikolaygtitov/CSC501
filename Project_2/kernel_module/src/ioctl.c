@@ -246,15 +246,17 @@ int memory_container_mmap(struct file *filp, struct vm_area_struct *vma)
 {
     struct task *task = NULL;
     struct object *object = NULL;
-    struct vm_area_struct kernel_vma;
+    //struct vm_area_struct kernel_vma;
 
     DEBUG("Called mmap, pid:%d.\n", current->pid);
 
     /* Copy user data to kernel */
+/*
     if (copy_from_user(&kernel_vma, (void *) vma, sizeof(struct vm_area_struct))) {
         ERROR("Copy from user of the vma failure on PID: %d.\n", current->pid);
         return -EFAULT;
     }
+*/
 
     mutex_lock(&c_lock);
     task = get_task(current->pid);
@@ -265,14 +267,14 @@ int memory_container_mmap(struct file *filp, struct vm_area_struct *vma)
     }
     
     /* Find an object for a given container and object id */
-    object = get_object(task->container, kernel_vma.vm_pgoff);
+    object = get_object(task->container, vma->vm_pgoff);
     
     if (!object) {
         /* Could not find object in the given container - create new object */
-        DEBUG("No such object OID: %lu in the container CID: %llu. Attempt to create new object...\n", kernel_vma.vm_pgoff, task->container->cid);
-        object = create_object(task->container, &kernel_vma);
+        DEBUG("No such object OID: %lu in the container CID: %llu. Attempt to create new object...\n", vma->vm_pgoff, task->container->cid);
+        object = create_object(task->container, vma);
         if (!object) {
-            ERROR("Unable to create object OID: %lu in the container CID: %llu -> PID: %d due to memory allocation issues.\n", kernel_vma.vm_pgoff, task->container->cid, task->pid);
+            ERROR("Unable to create object OID: %lu in the container CID: %llu -> PID: %d due to memory allocation issues.\n", vma->vm_pgoff, task->container->cid, task->pid);
             mutex_unlock(&c_lock);
             return ENOMEM;
         }
