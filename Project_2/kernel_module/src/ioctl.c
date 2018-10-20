@@ -83,7 +83,7 @@ struct list_head container_list;
  *
  * Iterates through all of the existing containers and tries to find container
  * based on the given container id.
- * If the container does not exist, retunrs NULL.
+ * If the container does not exist, returns NULL.
  */
 static struct container * get_container(__u64 cid)
 {
@@ -138,7 +138,7 @@ static struct object * get_object(struct container *container, __u64 oid)
 /**
  * Create a new container.
  *
- * Allocates container and assignes container id to the cid.
+ * Allocates container and assigns container id to the cid.
  * Initializes container list head and task list head.
  * Adds container to list.
  * If allocation of memory for container fails, returns NULL.
@@ -360,7 +360,7 @@ int memory_container_mmap(struct file *filp, struct vm_area_struct *vma)
  * Creates an object by creating a dummy VMM memory area struct and assigning
  * its offset to the object id. After object is created free dummy VMM memory
  * area. Object is only created if it does not exist.
- * Lock the object.
+ * Locks the object.
  */
 int memory_container_lock(struct memory_container_cmd __user *user_cmd)
 {
@@ -428,7 +428,7 @@ int memory_container_lock(struct memory_container_cmd __user *user_cmd)
  * corresponding error.
  * Finds an object based on the found task, its corresponding container, and
  * given object id. If the object is not found returns corresponding error.
- * Unlock the object.
+ * Unlocks the object.
  */
 int memory_container_unlock(struct memory_container_cmd __user *user_cmd)
 {
@@ -475,9 +475,6 @@ int memory_container_unlock(struct memory_container_cmd __user *user_cmd)
  * Deletes the task from the container.
  * Deletes and frees container only if container does not have anymore tasks and
  * objects in it.
- *
- * external functions needed:
- * mutex_lock(), mutex_unlock()
  */
 int memory_container_delete(struct memory_container_cmd __user *user_cmd)
 {
@@ -519,12 +516,6 @@ int memory_container_delete(struct memory_container_cmd __user *user_cmd)
  * Checks if container already exists. If it does not exist, creates new
  * container.
  * Creates new task. Inserts new task into the task list of the container.
- *
- * external functions needed:
- * copy_from_user(), mutex_lock(), mutex_unlock()
- *
- * external variables needed:
- * struct task_struct* current
  */
 int memory_container_create(struct memory_container_cmd __user *user_cmd)
 {
@@ -579,9 +570,6 @@ int memory_container_create(struct memory_container_cmd __user *user_cmd)
  * Frees an object that belongs to the container of the task.
  * Deletes and frees container only if container does not have anymore tasks
  * and objects in it.
- *
- * external functions needed:
- * copy_from_user(), mutex_lock(), mutex_unlock(), kfree()
  */
 int memory_container_free(struct memory_container_cmd __user *user_cmd)
 {
