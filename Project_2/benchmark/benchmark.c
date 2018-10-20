@@ -137,8 +137,9 @@ int main(int argc, char *argv[])
     // try delete something
     i = rand() % number_of_objects;
     mcontainer_lock(devfd, i);
+    gettimeofday(&current_time, NULL);
     mcontainer_free(devfd, i);
-    fprintf(fp, "D\t%d\t%d\t%ld\t%d\t%d\t%s\n", getpid(), cid, current_time.tv_sec * 1000000 + current_time.tv_usec, i, max_size_of_objects, mapped_data);
+    fprintf(fp, "D\t%d\t%d\t%ld\t%d\t%d\t%s\n", getpid(), cid, current_time.tv_sec * 1000000 + current_time.tv_usec, i, max_size_of_objects, "delete_an_object");
     mcontainer_unlock(devfd, i);
     
     
