@@ -262,6 +262,28 @@ static struct object * set_object_fields(struct object *object, struct vm_area_s
     return object;
 }
 
+/* Delete an object from the container and free it.
+ *
+ * Deletes from the container and frees an object.
+ * If corresponding container does not have anymore tasks and objects, removes
+ * and frees the container.
+ */
+static void delete_object(struct container *container, struct object *object)
+{
+    DEBUG("Deleting and freeing an object: CID: %llu -> OID: %llu.\n", container->cid, object->oid);
+    list_del(&object->list);
+    /* Free the object */
+    kfree(object);
+    /* If container does not have anymore tasks and objects in it, remove container */
+    if (list_empty(&container->task_list) && list_empty(&container->object_list)) {
+        DEBUG("Container does not have anymore tasks and objects: %llu. Attempt to deleted and free a container...\n", container->cid);
+        list_del(&container->list);
+        /* Free container */
+        kfree(container);
+    }
+    return;
+}
+
 /*
  * Request to remap kernel space memory into the user-space memory.
  *
@@ -426,9 +448,15 @@ int memory_container_lock(struct memory_container_cmd __user *user_cmd)
  * Finds a task based on pid by iterating through all containers and all the
  * tasks within each container. If the task is not found, returns
  * corresponding error.
- * Finds an object based on the found task, its corresponding container, and
+ * Finds an object based on the current task, its corresponding container, and
  * given object id. If the object is not found returns corresponding error.
  * Unlocks the object.
+ * Checks whether shared memory of the object is freed, then there was an
+ * attempt to delete this object, but the object was locked and delete was
+ * unsuccessful.
+ * Deletes this object from the container and frees it if its shared memory is
+ * freed. If corresponding container does not have anymore tasks and objects,
+ * removes the container.
  */
 int memory_container_unlock(struct memory_container_cmd __user *user_cmd)
 {
@@ -451,7 +479,7 @@ int memory_container_unlock(struct memory_container_cmd __user *user_cmd)
         mutex_unlock(&c_lock);
         return ESRCH;
     }
-    
+
     /* Find an object for a given container and object id */
     object = get_object(task->container, cmd.oid);
     
@@ -460,8 +488,15 @@ int memory_container_unlock(struct memory_container_cmd __user *user_cmd)
         mutex_unlock(&c_lock);
         return ESRCH;
     }
-
+    
     mutex_unlock(&object->lock);
+    
+    /* Delete the object from the container if it was attempted to be deleted */
+    if (!object->shared_memory) {
+        DEBUG("Shared memory of the object is freed: CID: %llu -> OID: %llu. Attempt to delete and free an object...\n", task->container->cid, object->oid);
+        delete_object(task->container, object);
+    }
+    
     mutex_unlock(&c_lock);
     return 0;
 }
@@ -497,8 +532,9 @@ int memory_container_delete(struct memory_container_cmd __user *user_cmd)
     
     /* If container does not have anymore tasks and objects in it, remove container */
     if (list_empty(&task->container->task_list) && list_empty(&task->container->object_list)) {
+        DEBUG("Container does not have anymore tasks and objects: %llu. Attempt to deleted and free a container...\n", task->container->cid);
         list_del(&task->container->list);
-        DEBUG("Container does not have anymore tasks nor objects. Deleted container from the list: %llu\n", task->container->cid);
+        /* Free container */
         kfree(task->container);
     }
     
@@ -565,11 +601,17 @@ int memory_container_create(struct memory_container_cmd __user *user_cmd)
  * Finds a task based on pid by iterating through all containers and all the
  * tasks within each container. If the task is not found returns corresponding
  * error.
- * Finds an object based on the found task, its corresponding container, and
+ * Finds an object based on the current task, its corresponding container, and
  * given object id. If the object is not found returns corresponding error.
- * Frees an object that belongs to the container of the task.
- * Deletes and frees container only if container does not have anymore tasks
- * and objects in it.
+ * Frees shared memory of the object, but does not delete the object yet since
+ * it can be locked.
+ * Checks whether an object is locked, then does not delete it from the
+ * container and does not free it.
+ * memory_container_unlock() function will complete deletion of the object when
+ * it is unlocked.
+ * Otherwise, deletes this object from the container and frees it.
+ * If corresponding container does not have anymore tasks and objects, removes
+ * the container.
  */
 int memory_container_free(struct memory_container_cmd __user *user_cmd)
 {
@@ -605,21 +647,16 @@ int memory_container_free(struct memory_container_cmd __user *user_cmd)
         return ENXIO;
     }
     
-    DEBUG("Object is found in the container, CID: %llu -> OID: %llu. Attempt to delete an object...\n", task->container->cid, object->oid);
+    DEBUG("Object is found in the container, CID: %llu -> OID: %llu. Attempt to free it shared memory...\n", task->container->cid, object->oid);
     
-    /* Delete the object from the container */
-    list_del(&object->list);
-    DEBUG("Deleted object in the container: CID: %llu -> OID: %llu. Freeing an object...\n", task->container->cid, object->oid);
-    
-    /* Free the object */
+    /* Free shared memory, but do not delete the object, since it can be locked */
     kfree(object->shared_memory);
-    kfree(object);
+    object->shared_memory = NULL;
     
-    /* If container does not have anymore tasks and objects in it, remove container */
-    if (list_empty(&task->container->task_list) && list_empty(&task->container->object_list)) {
-        list_del(&task->container->list);
-        DEBUG("Container does not have anymore tasks nor objects. Deleted container from the list: %llu. Freeing container...\n", task->container->cid);
-        kfree(task->container);
+    /* Check if object is locked, otherwise delete and free the object from the container */
+    if (!mutex_is_locked(&object->lock)) {
+        DEBUG("Object is not locked: CID: %llu -> OID: %llu. Attempt to delete and free an object ...\n", task->container->cid, object->oid);
+        delete_object(task->container, object);
     }
     
     mutex_unlock(&c_lock);
