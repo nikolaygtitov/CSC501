@@ -279,12 +279,14 @@ int memory_container_mmap(struct file *filp, struct vm_area_struct *vma)
 */
 
     mutex_lock(&c_lock);
+    DEBUG("Locked: %s\n", "c_lock");
     task = get_task(current->pid);
     if (!task) {
         ERROR("No such running task with PID: %d is found in existing containers.\n", current->pid);
         mutex_unlock(&c_lock);
         return ESRCH;
     }
+    DEBUG("Found task: %d\n", current->pid);
     
     /* Find an object for a given container and object id */
     object = get_object(task->container, vma->vm_pgoff);
@@ -299,6 +301,7 @@ int memory_container_mmap(struct file *filp, struct vm_area_struct *vma)
             return ENOMEM;
         }
     }
+    DEBUG("Found object: %llu\n", object->oid);
 
     if (!object->shared_memory) {
         /* Set object fields */
