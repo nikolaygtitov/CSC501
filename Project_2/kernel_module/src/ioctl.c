@@ -208,13 +208,14 @@ static struct object * create_object(struct container *container, struct vm_area
 
     /* Set object fields */
     object->oid = vma->vm_pgoff;
+
     /* Allocate requested size of the memory for object */
-    object->shared_memory = kmalloc(vma->vm_pgoff, GFP_KERNEL);
+    /* object->shared_memory = kmalloc(vma->vm_pgoff, GFP_KERNEL);
     if (!object->shared_memory) {
         return NULL;
-    }
+    } */
     /* Map virtual address to physical */
-    object->p_addr = virt_to_phys((void *) object->shared_memory);
+    /* object->p_addr = virt_to_phys((void *) object->shared_memory); */
 
     mutex_init(&object->lock);
     
@@ -226,6 +227,25 @@ static struct object * create_object(struct container *container, struct vm_area
     
     DEBUG("Added object OID: %llu into container CID: %llu.\n", object->oid, container->cid);
 
+    return object;
+}
+
+/**
+ * Set object fields.
+ * 
+ * Allocate memory for the object and space for a shared memory. Set all of the 
+ * objects fields. Map virtual address to a physical. Insert the object into 
+ * VMM area memory list of the resource memory container.
+ */
+static struct object * set_object_fields(struct object *object, struct vm_area_struct *vma)
+{
+    /* Allocate requested size of the memory for object */
+    object->shared_memory = kmalloc(vma->vm_pgoff, GFP_KERNEL);
+    if (!object->shared_memory) {
+        return NULL;
+    }
+    /* Map virtual address to physical */
+    object->p_addr = virt_to_phys((void *) object->shared_memory);
     return object;
 }
 
@@ -279,6 +299,16 @@ int memory_container_mmap(struct file *filp, struct vm_area_struct *vma)
             return ENOMEM;
         }
     }
+
+    if (!object->shared_memory) {
+        /* Set object fields */
+        object = set_object_fields(object, vma);
+        if (!object) {
+            ERROR("Unable to set object fields of object OID: %lu in the container CID: %llu -> PID: %d due to memory allocation issues.\n", vma->vm_pgoff, task->container->cid, task->pid);
+            mutex_unlock(&c_lock);
+            return ENOMEM;
+        }
+    }
     
     /* Remap kernel memory into the user-space */
     if (remap_pfn_range(vma, vma->vm_start, object->p_addr, object->oid, vma->vm_page_prot) != 0) {
@@ -299,6 +329,7 @@ int memory_container_lock(struct memory_container_cmd __user *user_cmd)
 {
     struct task *task = NULL;
     struct object *object = NULL;
+    struct vm_area_struct *vma = NULL;
     struct memory_container_cmd cmd;
 
     /* Copy user data to kernel */
@@ -307,9 +338,13 @@ int memory_container_lock(struct memory_container_cmd __user *user_cmd)
         return -EFAULT;
     }
 
+    /* Allocate vma */
+    vma = (struct vm_area_struct *) kcalloc(1, sizeof(struct vm_area_struct), GFP_KERNEL);
+
     DEBUG("Called lock, oid:%llu\n", cmd.oid);
     
     mutex_lock(&c_lock);
+    vma->vm_pgoff = cmd.oid;
     task = get_task(current->pid);
     if (!task) {
         ERROR("No such running task with PID: %d is found in existing containers.\n", current->pid);
@@ -322,8 +357,12 @@ int memory_container_lock(struct memory_container_cmd __user *user_cmd)
     
     if (!object) {
         ERROR("No such object OID: %llu in the container CID: %llu.\n", cmd.oid, task->container->cid);
-        mutex_unlock(&c_lock);
-        return ESRCH;
+        object = create_object(task->container, vma);
+        if (!object) {
+            ERROR("Unable to create object OID: %lu in the container CID: %llu -> PID: %d due to memory allocation issues.\n", vma->vm_pgoff, task->container->cid, task->pid);
+            mutex_unlock(&c_lock);
+            return ENOMEM;
+        }
     }
 
     mutex_lock(&object->lock);
