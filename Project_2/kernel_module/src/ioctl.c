@@ -240,7 +240,7 @@ static struct object * create_object(struct container *container, struct vm_area
 static struct object * set_object_fields(struct object *object, struct vm_area_struct *vma)
 {
     /* Allocate requested size of the memory for object */
-    object->shared_memory = kmalloc(vma->vm_pgoff, GFP_KERNEL);
+    object->shared_memory = kmalloc((vma->vm_end - vma->vm_start), GFP_KERNEL);
     if (!object->shared_memory) {
         return NULL;
     }
@@ -304,6 +304,7 @@ int memory_container_mmap(struct file *filp, struct vm_area_struct *vma)
     DEBUG("Found object: %llu\n", object->oid);
 
     if (!object->shared_memory) {
+        DEBUG("Object shared memory is not alloc yet: %llu\n", object->oid);
         /* Set object fields */
         object = set_object_fields(object, vma);
         if (!object) {
@@ -311,7 +312,9 @@ int memory_container_mmap(struct file *filp, struct vm_area_struct *vma)
             mutex_unlock(&c_lock);
             return ENOMEM;
         }
+        DEBUG("Object fields are set: %llu\n", object->oid);
     }
+    DEBUG("Ready to call remap_pfn_range(): %llu\n", object->oid);
     
     /* Remap kernel memory into the user-space */
     if (remap_pfn_range(vma, vma->vm_start, object->p_addr, object->oid, vma->vm_page_prot) != 0) {
