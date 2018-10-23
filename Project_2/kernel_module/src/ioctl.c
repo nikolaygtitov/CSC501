@@ -253,7 +253,7 @@ static struct object * set_object_fields(struct object *object, struct vm_area_s
 {
     /* Allocate requested size of the memory for object */
     object->size = (unsigned long) (vma->vm_end - vma->vm_start);
-    object->shared_memory = kmalloc(object->size, GFP_KERNEL);
+    object->shared_memory = kzalloc(object->size, GFP_KERNEL);
     if (!object->shared_memory) {
         return NULL;
     }
