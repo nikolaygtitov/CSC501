@@ -548,7 +548,7 @@ int memory_container_create(struct memory_container_cmd __user *user_cmd)
  */
 int memory_container_free(struct memory_container_cmd __user *user_cmd)
 {
-    struct container *container = NULL;
+    struct task *task = NULL;
     struct object *object = NULL;
     struct memory_container_cmd cmd;
 
@@ -562,41 +562,39 @@ int memory_container_free(struct memory_container_cmd __user *user_cmd)
 
     mutex_lock(&c_lock);
 
-    /* Find container with a given cid */
-    container = get_container(cmd.cid);
-    if (!container) {
-        /* Could not find container in list - cannot remove the object */
-        ERROR("Container does not exist, CID: %llu, unable to remove an object, OID: %llu.\n", cmd.cid, cmd.oid);
+    /* Get task based on the process id */
+    task = get_task(current->pid);
+    if (!task) {
+        ERROR("No such running task with PID: %d is found in existing containers.\n", current->pid);
         mutex_unlock(&c_lock);
-        return ENXIO;
+        return ESRCH;
     }
-    
-    DEBUG("Container is found, CID: %llu. Attempt to find object, OID: %llu.\n", container->cid, cmd.oid);
-    
-    /* Find object with a given container and iod */
-    object = get_object(container, cmd.oid);
+
+    /* Find an object for a given container and object id */
+    object = get_object(task->container, cmd.oid);
+
     if (!object) {
         /* Could not find object in the list for a given container - cannot remove the object */
-        ERROR("Unable to find object, OID: %llu in the container, CID: %llu; Will not remove object.\n", cmd.oid, container->cid);
+        ERROR("Unable to find object, OID: %llu in the container, CID: %llu; Will not remove object.\n", cmd.oid, task->container->cid);
         mutex_unlock(&c_lock);
         return ENXIO;
     }
     
-    DEBUG("Object is found in the container, CID: %llu -> OID: %llu. Attempt to delete an object...\n", container->cid, object->oid);
+    DEBUG("Object is found in the container, CID: %llu -> OID: %llu. Attempt to delete an object...\n", task->container->cid, object->oid);
     
     /* Delete the object from the container */
     list_del(&object->list);
-    DEBUG("Deleted object in the container: CID: %llu -> OID: %llu. Freeing an object...\n", container->cid, object->oid);
+    DEBUG("Deleted object in the container: CID: %llu -> OID: %llu. Freeing an object...\n", task->container->cid, object->oid);
     
     /* Free the object */
     kfree(object->shared_memory);
     kfree(object);
     
     /* If container does not have anymore tasks and objects in it, remove container */
-    if (list_empty(&container->task_list) && list_empty(&container->object_list)) {
-        list_del(&container->list);
-        DEBUG("Container does not have anymore tasks nor objects. Deleted container from the list: %llu. Freeing container...\n", container->cid);
-        kfree(container);
+    if (list_empty(&task->container->task_list) && list_empty(&task->container->object_list)) {
+        list_del(&task->container->list);
+        DEBUG("Container does not have anymore tasks nor objects. Deleted container from the list: %llu. Freeing container...\n", task->container->cid);
+        kfree(task->container);
     }
     
     mutex_unlock(&c_lock);
