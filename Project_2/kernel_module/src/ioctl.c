@@ -80,8 +80,10 @@ struct list_head container_list;
 
 /**
  * Get the container with the given cid.
- * 
- * If the container does not exist, NULL is returned.
+ *
+ * Iterates through all of the existing containers and tries to find container
+ * based on the given container id.
+ * If the container does not exist, retunrs NULL.
  */
 static struct container * get_container(__u64 cid)
 {
@@ -96,10 +98,10 @@ static struct container * get_container(__u64 cid)
 
 /**
  * Get the running task for a given pid of the process.
- * 
- * Iterate through all containers and all the tasks within each container to 
- * find a task. 
- * If the task does not exist, NULL is returned.
+ *
+ * Iterates through all containers and all the tasks within each container to
+ * find a task.
+ * If the task does not exist, returns NULL.
  */
 static struct task * get_task(__u64 pid)
 {
@@ -117,6 +119,10 @@ static struct task * get_task(__u64 pid)
 
 /**
  * Get the object for a given container and object id (oid).
+ *
+ * Iterates through all containers and all the objects within each container to
+ * find an object.
+ * If the object does not exist, returns NULL.
  */
 static struct object * get_object(struct container *container, __u64 oid)
 {
@@ -131,6 +137,11 @@ static struct object * get_object(struct container *container, __u64 oid)
 
 /**
  * Create a new container.
+ *
+ * Allocates container and assignes container id to the cid.
+ * Initializes container list head and task list head.
+ * Adds container to list.
+ * If allocation of memory for container fails, returns NULL.
  */
 static struct container * create_container(__u64 cid)
 {
@@ -163,6 +174,11 @@ static struct container * create_container(__u64 cid)
 
 /**
  * Create task.
+ *
+ * Allocates task and sets task fields.
+ * Initializes task list head and adds newly create task next to the currently
+ * running task of the task list of the container.
+ * If allocation of memory for task fails, returns NULL.
  */
 static struct task * create_task(struct container *container, struct task_struct *task_struct)
 {
@@ -182,7 +198,7 @@ static struct task * create_task(struct container *container, struct task_struct
     /* Initialize task list head */
     INIT_LIST_HEAD(&task->list);
 
-    /* Add this new task next to currently running task to the task list of the container */
+    /* Add this new task next to the currently running task of the task list of the container */
     list_add(&task->list, container->task_list.next);
 
     DEBUG("Added task %llu:%d\n", container->cid, task->pid);
@@ -192,11 +208,12 @@ static struct task * create_task(struct container *container, struct task_struct
 
 /**
  * Create a VMM area memory object.
- * 
- * Allocate object and assign the object id. Initialize mutex lock and object 
- * list head. Insert the object into VMM area memory list of the resource 
- * memory container.
- * If allocation of memory for object fails return NULL.
+ *
+ * Allocates object and assigns the object id.
+ * Initializes mutex lock and object list head.
+ * Inserts the object into VMM area memory list of the resource memory
+ * container.
+ * If allocation of memory for object fails, returns NULL.
  */
 static struct object * create_object(struct container *container, struct vm_area_struct *vma)
 {
@@ -226,10 +243,11 @@ static struct object * create_object(struct container *container, struct vm_area
 
 /**
  * Set object fields.
- * 
- * Allocate memory for a shared memory. Set all of the objects fields. Map 
- * virtual address to a physical.
- * If allocation of shared memory fails return NULL.
+ *
+ * Allocates shared memory. Sets all of the objects fields based on the given
+ * VMM memory area.
+ * Maps virtual address to a physical.
+ * If allocation of shared memory fails, returns NULL.
  */
 static struct object * set_object_fields(struct object *object, struct vm_area_struct *vma)
 {
@@ -246,16 +264,23 @@ static struct object * set_object_fields(struct object *object, struct vm_area_s
 
 /*
  * Request to remap kernel space memory into the user-space memory.
- * 
- * The kernel module takes an offset from the user-space library as vm area 
- * struct and allocates shared memory with the size associated with the offset. 
- * The offset is considered to be an object id (oid). If an object associated 
- * with an offset was already created/requested since the kernel module is 
- * loaded, the mmap request should assign the address of the previously 
- * allocated object to the mmap request. Hence, first it attempts to find an 
- * existing object within a given container identified based on the current task 
- * that initiated the mmap call. If such object is not found, create one.
- * Lastly, remap kernel memory into the user-space.
+ *
+ * The kernel module takes an offset from the user-space library as vm area
+ * struct and allocates shared memory with the size associated with the offset.
+ * The offset is considered to be an object id (oid). If an object associated
+ * with an offset was already created/requested since the kernel module is
+ * loaded, the mmap request should assign the address of the previously
+ * allocated object to the mmap request.
+ * Finds a task based on pid by iterating through all containers and all the
+ * tasks within each container. If the task is not found returns corresponding
+ * error.
+ * Finds an object based on the found task, its corresponding container, and
+ * given object id. If object is not found, it has not been created yet.
+ * Creates an object based on the given VMM memory area struct and sets all
+ * the object fields with the given VMM memory area struct attributes.
+ * Object fields are only set if there is no shared memory allocated for the
+ * found object or this is a new object.
+ * Lastly, remaps kernel memory into the user-space.
  */
 int memory_container_mmap(struct file *filp, struct vm_area_struct *vma)
 {
@@ -326,11 +351,15 @@ int memory_container_mmap(struct file *filp, struct vm_area_struct *vma)
 
 /*
  * Mutex Lock.
- * 
- * Find a task and an object based on oid. If object is not found, it has not 
- * been created yet. Create one by creating a dummy VMM memory area struct and 
- * assigning its offset to the object id. After object is created free dummy 
- * VMM memory area.
+ *
+ * Finds a task based on pid by iterating through all containers and all the
+ * tasks within each container. If the task is not found returns corresponding
+ * error.
+ * Finds an object based on the found task, its corresponding container, and
+ * given object id. If object is not found, it has not been created yet.
+ * Creates an object by creating a dummy VMM memory area struct and assigning
+ * its offset to the object id. After object is created free dummy VMM memory
+ * area. Object is only created if it does not exist.
  * Lock the object.
  */
 int memory_container_lock(struct memory_container_cmd __user *user_cmd)
@@ -350,7 +379,7 @@ int memory_container_lock(struct memory_container_cmd __user *user_cmd)
     
     mutex_lock(&c_lock);
     
-    /* Get task */
+    /* Get task based on the process id */
     task = get_task(current->pid);
     if (!task) {
         ERROR("No such running task with PID: %d is found in existing containers.\n", current->pid);
@@ -393,9 +422,12 @@ int memory_container_lock(struct memory_container_cmd __user *user_cmd)
 
 /*
  * Mutex Unlock.
- * 
- * Find a task and an object based on oid. If object is not found, there is an 
- * error, exit.
+ *
+ * Finds a task based on pid by iterating through all containers and all the
+ * tasks within each container. If the task is not found, returns
+ * corresponding error.
+ * Finds an object based on the found task, its corresponding container, and
+ * given object id. If the object is not found returns corresponding error.
  * Unlock the object.
  */
 int memory_container_unlock(struct memory_container_cmd __user *user_cmd)
@@ -436,13 +468,14 @@ int memory_container_unlock(struct memory_container_cmd __user *user_cmd)
 
 /**
  * Delete the task from the container.
- * 
- * Finds task based on pid by iterating through all containers and all the 
- * tasks within each container.
+ *
+ * Finds a task based on pid by iterating through all containers and all the
+ * tasks within each container. If the task is not found, returns corresponding
+ * error.
  * Deletes the task from the container.
  * Deletes and frees container only if container does not have anymore tasks and
  * objects in it.
- * 
+ *
  * external functions needed:
  * mutex_lock(), mutex_unlock()
  */
@@ -482,15 +515,16 @@ int memory_container_delete(struct memory_container_cmd __user *user_cmd)
 
 /**
  * Create a task in the corresponding container.
- * 
- * Check if container already exists. If it does not exist, create new container. 
- * Create new task. Insert new task into the task list of the container.
- * 
+ *
+ * Checks if container already exists. If it does not exist, creates new
+ * container.
+ * Creates new task. Inserts new task into the task list of the container.
+ *
  * external functions needed:
  * copy_from_user(), mutex_lock(), mutex_unlock()
- * 
+ *
  * external variables needed:
- * struct task_struct* current  
+ * struct task_struct* current
  */
 int memory_container_create(struct memory_container_cmd __user *user_cmd)
 {
@@ -536,13 +570,16 @@ int memory_container_create(struct memory_container_cmd __user *user_cmd)
 
 /**
  * Free an object from memory container.
- * 
- * Finds a container based on the process id. If container is not found 
- * corresponding error is returned.
- * Frees an object that belongs to this container.
- * Deletes and frees container only if container does not have anymore tasks and
- * objects in it.
- * 
+ *
+ * Finds a task based on pid by iterating through all containers and all the
+ * tasks within each container. If the task is not found returns corresponding
+ * error.
+ * Finds an object based on the found task, its corresponding container, and
+ * given object id. If the object is not found returns corresponding error.
+ * Frees an object that belongs to the container of the task.
+ * Deletes and frees container only if container does not have anymore tasks
+ * and objects in it.
+ *
  * external functions needed:
  * copy_from_user(), mutex_lock(), mutex_unlock(), kfree()
  */
@@ -601,6 +638,9 @@ int memory_container_free(struct memory_container_cmd __user *user_cmd)
     return 0;
 }
 
+/*
+ * Print content of the task for debugging purposes.
+ */
 static void debug_print_task(struct task *task)
 {
     if (!task) {
@@ -611,6 +651,9 @@ static void debug_print_task(struct task *task)
     }
 }
 
+/*
+ * Print content of the container for debugging purposes.
+ */
 static void debug_print_container(struct container *container)
 {
     struct task *task = NULL;
@@ -622,7 +665,7 @@ static void debug_print_container(struct container *container)
 }
 
 /**
- * Print debug information
+ * Print debug information.
  */
 int memory_container_debug(struct memory_container_cmd __user *user_cmd)
 {
