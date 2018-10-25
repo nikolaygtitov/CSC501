@@ -437,8 +437,8 @@ int memory_container_lock(struct memory_container_cmd __user *user_cmd)
         kfree(vma);
     }
 
-    mutex_lock(&object->lock);
     mutex_unlock(&c_lock);
+    mutex_lock(&object->lock);
     return 0;
 }
 
