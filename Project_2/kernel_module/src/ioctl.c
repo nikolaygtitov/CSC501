@@ -215,7 +215,7 @@ static struct task * create_task(struct container *container, struct task_struct
  * container.
  * If allocation of memory for object fails, returns NULL.
  */
-static struct object * create_object(struct container *container, struct vm_area_struct *vma)
+static struct object * create_object(struct container *container, __u64 oid)
 {
     struct object *object = NULL;
 
@@ -226,7 +226,10 @@ static struct object * create_object(struct container *container, struct vm_area
     }
 
     /* Set object fields */
-    object->oid = vma->vm_pgoff;
+    object->oid = oid;
+    object->size = 0;
+    object->shared_memory = NULL;
+    object->pfn = 0;
 
     mutex_init(&object->lock);
     
@@ -336,7 +339,7 @@ int memory_container_mmap(struct file *filp, struct vm_area_struct *vma)
     if (!object) {
         /* Could not find object in the given container - create new object */
         DEBUG("No such object OID: %lu in the container CID: %llu. Attempt to create new object...\n", vma->vm_pgoff, task->container->cid);
-        object = create_object(task->container, vma);
+        object = create_object(task->container, vma->vm_pgoff);
         if (!object) {
             ERROR("Unable to create object OID: %lu in the container CID: %llu -> PID: %d due to memory allocation issues.\n", vma->vm_pgoff, task->container->cid, task->pid);
             mutex_unlock(&c_lock);
@@ -426,7 +429,7 @@ int memory_container_lock(struct memory_container_cmd __user *user_cmd)
         vma->vm_pgoff = cmd.oid;
         
         /* Create new object */
-        object = create_object(task->container, vma);
+        object = create_object(task->container, vma->vm_pgoff);
         if (!object) {
             ERROR("Unable to create object OID: %lu in the container CID: %llu -> PID: %d due to memory allocation issues.\n", vma->vm_pgoff, task->container->cid, task->pid);
             mutex_unlock(&c_lock);
