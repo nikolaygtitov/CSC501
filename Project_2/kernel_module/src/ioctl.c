@@ -70,6 +70,7 @@ struct object {
     char *shared_memory;
     unsigned long size;
     unsigned long pfn;
+    unsigned waiting_threads;
     struct mutex lock;
     struct list_head list;
 };
@@ -244,6 +245,7 @@ static struct object * create_object(struct container *container, __u64 oid)
     object->size = 0;
     object->shared_memory = NULL;
     object->pfn = 0;
+    object->waiting_threads = 0;
 
     mutex_init(&object->lock);
     
@@ -436,8 +438,19 @@ int memory_container_lock(struct memory_container_cmd __user *user_cmd)
         }
     }
 
+    /* Increment so object isn't deleted while we are waiting */
+    ++object->waiting_threads;
+
     mutex_unlock(&c_lock);
+
+    /* Threads will sleep here, but with waiting_threads positive, so the object will not be deleted */
     mutex_lock(&object->lock);
+
+    /* Decrement waiting_threads */
+    mutex_lock(&c_lock);
+    --object->waiting_threads;
+    mutex_unlock(&c_lock);
+
     return 0;
 }
 
@@ -491,7 +504,7 @@ int memory_container_unlock(struct memory_container_cmd __user *user_cmd)
     mutex_unlock(&object->lock);
     
     /* Delete the object from the container if it was attempted to be deleted */
-    if (!object->shared_memory) {
+    if (!object->shared_memory && object->waiting_threads == 0) {
         DEBUG("Shared memory of the object is freed: CID: %llu -> OID: %llu. Attempt to delete and free an object...\n", task->container->cid, object->oid);
         delete_object(task->container, object);
     }
@@ -649,7 +662,7 @@ int memory_container_free(struct memory_container_cmd __user *user_cmd)
     object->shared_memory = NULL;
     
     /* Check if object is locked, otherwise delete and free the object from the container */
-    if (!mutex_is_locked(&object->lock)) {
+    if (!mutex_is_locked(&object->lock) && object->waiting_threads == 0) {
         DEBUG("Object is not locked: CID: %llu -> OID: %llu. Attempt to delete and free an object ...\n", task->container->cid, object->oid);
         delete_object(task->container, object);
     }
