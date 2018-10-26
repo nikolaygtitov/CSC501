@@ -172,6 +172,20 @@ static struct container * create_container(__u64 cid)
     return container;
 }
 
+/*
+ * Delete a container if it doesn't have any tasks or objects
+ */
+static void delete_container(struct container *container)
+{
+    /* If container does not have anymore tasks and objects in it, remove container */
+    if (list_empty(&container->task_list) && list_empty(&container->object_list)) {
+        DEBUG("Container does not have anymore tasks and objects: %llu. Attempt to deleted and free a container...\n", container->cid);
+        list_del(&container->list);
+        /* Free container */
+        kfree(container);
+    }
+}
+
 /**
  * Create task.
  *
@@ -278,12 +292,7 @@ static void delete_object(struct container *container, struct object *object)
     /* Free the object */
     kfree(object);
     /* If container does not have anymore tasks and objects in it, remove container */
-    if (list_empty(&container->task_list) && list_empty(&container->object_list)) {
-        DEBUG("Container does not have anymore tasks and objects: %llu. Attempt to deleted and free a container...\n", container->cid);
-        list_del(&container->list);
-        /* Free container */
-        kfree(container);
-    }
+    delete_container(container);
     return;
 }
 
@@ -391,7 +400,6 @@ int memory_container_lock(struct memory_container_cmd __user *user_cmd)
 {
     struct task *task = NULL;
     struct object *object = NULL;
-    struct vm_area_struct *vma = NULL;
     struct memory_container_cmd cmd;
 
     /* Copy user data to kernel */
@@ -419,25 +427,13 @@ int memory_container_lock(struct memory_container_cmd __user *user_cmd)
         /* There is no such object with oid, create one */
         DEBUG("No such object OID: %llu in the container CID: %llu. Attempt to create an object ...\n", cmd.oid, task->container->cid);
         
-        /* Allocate dummy vma just for initial creation of object */
-        vma = (struct vm_area_struct *) kcalloc(1, sizeof(struct vm_area_struct), GFP_KERNEL);
-        if (!vma) {
-            ERROR("Unable to create dummy VMM memory area struct for creating new object OID: %llu due to memory allocation issues.\n", cmd.oid);
-            mutex_unlock(&c_lock);
-            return ENOMEM;
-        }
-        vma->vm_pgoff = cmd.oid;
-        
         /* Create new object */
-        object = create_object(task->container, vma->vm_pgoff);
+        object = create_object(task->container, cmd.oid);
         if (!object) {
-            ERROR("Unable to create object OID: %lu in the container CID: %llu -> PID: %d due to memory allocation issues.\n", vma->vm_pgoff, task->container->cid, task->pid);
+            ERROR("Unable to create object OID: %llu in the container CID: %llu -> PID: %d due to memory allocation issues.\n", cmd.oid, task->container->cid, task->pid);
             mutex_unlock(&c_lock);
             return ENOMEM;
         }
-        
-        /* Free dummy vma */
-        kfree(vma);
     }
 
     mutex_unlock(&c_lock);
@@ -517,6 +513,7 @@ int memory_container_unlock(struct memory_container_cmd __user *user_cmd)
 int memory_container_delete(struct memory_container_cmd __user *user_cmd)
 {
     struct task *task = NULL;
+    struct container *container = NULL;
 
     DEBUG("Called delete: pid:%d\n", current->pid);
 
@@ -529,21 +526,16 @@ int memory_container_delete(struct memory_container_cmd __user *user_cmd)
         return ESRCH;
     }
 
+    container = task->container;
+
     /* Delete the task from the container */
     list_del(&task->list);
-    DEBUG("Deleted task: CID: %llu -> PID: %d. Attempt to free task...\n", task->container->cid, task->pid);
+    /* Free task */
+    kfree(task);
+    DEBUG("Deleted and freed task: CID: %llu -> PID: %d\n", task->container->cid, task->pid);
     
     /* If container does not have anymore tasks and objects in it, remove container */
-    if (list_empty(&task->container->task_list) && list_empty(&task->container->object_list)) {
-        DEBUG("Container does not have anymore tasks and objects: %llu. Attempt to deleted and free a container...\n", task->container->cid);
-        list_del(&task->container->list);
-        /* Free container */
-        kfree(task->container);
-    }
-    
-    /* Free task */
-    DEBUG("Freeing task: CID: %llu -> PID: %d.\n", task->container->cid, task->pid);
-    kfree(task);
+    delete_container(container);
     
     mutex_unlock(&c_lock);
     return 0;
