@@ -21,7 +21,7 @@ for num_of_objects in range(POWER_OF_MAX_NUMBER_OF_OBJECTS):
                 print(command)
                 output = subprocess.check_output(command, stderr=subprocess.STDOUT).decode('UTF-8')
                 passes = output.count('Pass')
-                if output == 'Device open failed':
+                if output == 'Device open failedcat: \'*.log\': No such file or directory\nDevice open failed':
                     device_error = device_error + 1
                     continue
                 elif passes != containers:
