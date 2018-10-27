@@ -10,6 +10,7 @@ MAX_NUMBER_OF_CONTAINERS = 101
 
 total_tests = 0
 device_error = 0
+error_messages = []
 
 for num_of_objects in range(POWER_OF_MAX_NUMBER_OF_OBJECTS):
     for size_of_objects in range(1, POWER_OF_MAX_SIZE_OF_OBJECTS):
@@ -21,8 +22,9 @@ for num_of_objects in range(POWER_OF_MAX_NUMBER_OF_OBJECTS):
                 print(command)
                 output = subprocess.check_output(command, stderr=subprocess.STDOUT).decode('UTF-8')
                 passes = output.count('Pass')
-                if output == 'Device open failedcat: \'*.log\': No such file or directory\nDevice open failed':
+                if 'Device open failed' in output:
                     device_error = device_error + 1
+                    error_messages.append(output)
                     continue
                 elif passes != containers:
                     print('Failed: {}'.format(output))
@@ -32,4 +34,4 @@ for num_of_objects in range(POWER_OF_MAX_NUMBER_OF_OBJECTS):
 print('Success!!!')
 
 if device_error:
-    print('\nDevice open failed Error occurred {} times.'.format(device_error))
+    print('\nDevice open failed Error occurred {} times with the following errors:\n{}'.format(device_error, '\n'.join(error_messages)))
