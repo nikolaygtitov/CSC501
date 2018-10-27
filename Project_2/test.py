@@ -3,10 +3,10 @@
 import subprocess
 import random
 
-POWER_OF_MAX_NUMBER_OF_OBJECTS = 17
-POWER_OF_MAX_SIZE_OF_OBJECTS = 17
-MAX_NUMBER_OF_TASKS = 101
-MAX_NUMBER_OF_CONTAINERS = 101
+POWER_OF_MAX_NUMBER_OF_OBJECTS = 8
+POWER_OF_MAX_SIZE_OF_OBJECTS = 11
+MAX_NUMBER_OF_TASKS = 9
+MAX_NUMBER_OF_CONTAINERS = 9
 
 total_tests = 0
 device_error = 0
@@ -14,9 +14,9 @@ error_messages = []
 
 for num_of_objects in range(POWER_OF_MAX_NUMBER_OF_OBJECTS):
     for size_of_objects in range(1, POWER_OF_MAX_SIZE_OF_OBJECTS):
-        for tasks in range(1, MAX_NUMBER_OF_TASKS):
-            for containers in range(1, MAX_NUMBER_OF_CONTAINERS):
-                command = ['./test.sh', str(2**num_of_objects), str(2**size_of_objects), str(tasks), str(containers)]
+        for tasks in range(MAX_NUMBER_OF_TASKS):
+            for containers in range(MAX_NUMBER_OF_CONTAINERS):
+                command = ['./test.sh', str(2**num_of_objects), str(2**size_of_objects), str(2**tasks), str(2**containers)]
                 '''command = './test.sh {} {} {} {}'.format(2**num_of_objects, 2**size_of_objects, tasks, containers)'''
                 subprocess.check_call(['bash', '-c', 'sudo dmesg --clear'])
                 print(command)
@@ -26,7 +26,7 @@ for num_of_objects in range(POWER_OF_MAX_NUMBER_OF_OBJECTS):
                     device_error = device_error + 1
                     error_messages.append(output)
                     continue
-                elif passes != containers:
+                elif passes != 2**containers:
                     print('Failed: {}'.format(output))
                     exit(1)
                 total_tests = total_tests + 1
