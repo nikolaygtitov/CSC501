@@ -9,6 +9,7 @@ MAX_NUMBER_OF_TASKS = 101
 MAX_NUMBER_OF_CONTAINERS = 101
 
 total_tests = 0
+device_error = 0
 
 for num_of_objects in range(POWER_OF_MAX_NUMBER_OF_OBJECTS):
     for size_of_objects in range(1, POWER_OF_MAX_SIZE_OF_OBJECTS):
@@ -20,9 +21,15 @@ for num_of_objects in range(POWER_OF_MAX_NUMBER_OF_OBJECTS):
                 print(command)
                 output = subprocess.check_output(command, stderr=subprocess.STDOUT).decode('UTF-8')
                 passes = output.count('Pass')
-                if(passes != containers):
+                if output == 'Device open failed':
+                    device_error = device_error + 1
+                    continue
+                elif passes != containers:
                     print('Failed: {}'.format(output))
                     exit(1)
                 total_tests = total_tests + 1
                 print('{}\nTotal Tests Passed: {}\n'.format(output, total_tests))
 print('Success!!!')
+
+if device_error:
+    print('\nDevice open failed Error occurred {} times.'.format(device_error))
