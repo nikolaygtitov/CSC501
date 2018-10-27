@@ -11,7 +11,7 @@ MAX_NUMBER_OF_CONTAINERS = 101
 total_tests = 0
 
 for num_of_objects in range(POWER_OF_MAX_NUMBER_OF_OBJECTS):
-    for size_of_objects in range(POWER_OF_MAX_SIZE_OF_OBJECTS):
+    for size_of_objects in range(1, POWER_OF_MAX_SIZE_OF_OBJECTS):
         for tasks in range(1, MAX_NUMBER_OF_TASKS):
             for containers in range(1, MAX_NUMBER_OF_CONTAINERS):
                 command = ['./test.sh', str(2**num_of_objects), str(2**size_of_objects), str(tasks), str(containers)]
