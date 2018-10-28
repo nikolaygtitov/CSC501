@@ -371,6 +371,11 @@ int memory_container_mmap(struct file *filp, struct vm_area_struct *vma)
             return ENOMEM;
         }
         DEBUG("Object fields are set: %llu\n", object->oid);
+    } else {
+        /* Object was already allocated - make sure the size isn't different */
+        if (object->size != (vma->vm_end - vma->vm_start)) {
+            return EINVAL;
+        }
     }
     DEBUG("Ready to call remap_pfn_range(): %llu\n", object->oid);
     
