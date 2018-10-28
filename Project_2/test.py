@@ -2,6 +2,7 @@
 
 import subprocess
 import random
+import time
 
 POWER_OF_MAX_NUMBER_OF_OBJECTS = 8
 POWER_OF_MAX_SIZE_OF_OBJECTS = 11
@@ -24,7 +25,7 @@ class Tester:
         output = subprocess.check_output(command, stderr=subprocess.STDOUT).decode('UTF-8')
         passes = output.count('Pass')
         if 'Device open failed' in output:
-            self.device_error = device_error + 1
+            self.device_error += 1
             self.error_messages.append(output)
             return
         elif passes != containers:
@@ -32,6 +33,7 @@ class Tester:
             exit(1)
         self.total_tests += 1
         print('{}\nTotal Tests Passed: {}\n'.format(output, self.total_tests))
+        time.sleep(0.5)
 
     def test_variations(self):
         for num_of_objects in range(POWER_OF_MAX_NUMBER_OF_OBJECTS):
@@ -49,8 +51,8 @@ class Tester:
 
 if __name__ == '__main__':
     tester = Tester()
-    #tester.test_variation()
-    tester.test_loop(128, 8, 64, 64)
+    tester.test_variations()
+    #tester.test_loop(128, 8, 64, 64)
 
     if tester.device_error:
         print('\nDevice open failed Error occurred {} times with the following errors:\n{}'.format(tester.device_error, '\n'.join(tester.error_messages)))
