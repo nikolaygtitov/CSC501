@@ -320,6 +320,7 @@ static void delete_object(struct container *container, struct object *object)
  */
 int memory_container_mmap(struct file *filp, struct vm_area_struct *vma)
 {
+    int rc = 0;
     struct task *task = NULL;
     struct object *object = NULL;
     //struct vm_area_struct kernel_vma;
@@ -374,7 +375,10 @@ int memory_container_mmap(struct file *filp, struct vm_area_struct *vma)
     DEBUG("Ready to call remap_pfn_range(): %llu\n", object->oid);
     
     /* Remap kernel memory into the user-space */
-    if (remap_pfn_range(vma, vma->vm_start, object->pfn, object->size, vma->vm_page_prot) != 0) {
+    down_write(&vma->vm_mm->mmap_sem);
+    rc = remap_pfn_range(vma, vma->vm_start, object->pfn, object->size, vma->vm_page_prot);
+    up_write(&vma->vm_mm->mmap_sem);
+    if (rc) {
         ERROR("Failed: Unable to remap kernel memory into the user space; CID: %llu -> PID: %d -> OID: %llu.\n", task->container->cid, task->pid, object->oid);
         mutex_unlock(&c_lock);
         return EADDRNOTAVAIL;

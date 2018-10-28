@@ -3,8 +3,8 @@
 import subprocess
 import random
 
-POWER_OF_MAX_NUMBER_OF_OBJECTS = 17
-POWER_OF_MAX_SIZE_OF_OBJECTS = 17
+POWER_OF_MAX_NUMBER_OF_OBJECTS = 8
+POWER_OF_MAX_SIZE_OF_OBJECTS = 11
 MAX_NUMBER_OF_TASKS = 9
 MAX_NUMBER_OF_CONTAINERS = 9
 
@@ -54,3 +54,4 @@ if __name__ == '__main__':
 
     if tester.device_error:
         print('\nDevice open failed Error occurred {} times with the following errors:\n{}'.format(tester.device_error, '\n'.join(tester.error_messages)))
+

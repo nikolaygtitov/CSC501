@@ -50,6 +50,30 @@ extern struct miscdevice memory_container_dev;
 extern struct mutex c_lock;
 extern struct list_head container_list;
 
+struct container {
+    __u64 cid;
+    struct list_head list;
+    struct list_head task_list;
+    struct list_head object_list;
+};
+
+struct task {
+    pid_t pid;
+    struct task_struct *task_struct;
+    struct container *container;
+    struct list_head list;
+};
+
+struct object {
+    __u64 oid;
+    char *shared_memory;
+    unsigned long size;
+    unsigned long pfn;
+    unsigned waiting_threads;
+    struct mutex lock;
+    struct list_head list;
+};
+
 /**
  * Initialize and register the kernel module
  */
@@ -74,5 +98,28 @@ int memory_container_init(void)
  */ 
 void memory_container_exit(void)
 {
+    /* Free resources */
+    struct container *container, *ncontainer = NULL;
+    struct task *task, *ntask = NULL;
+    struct object *object, *nobject = NULL;
+    list_for_each_entry_safe(container, ncontainer, &container_list, list) {
+        /* Free tasks */
+        list_for_each_entry_safe(task, ntask, &container->task_list, list) {
+            list_del(&task->list);
+            kfree(task);
+        }
+        /* Free objects */
+        list_for_each_entry_safe(object, nobject, &container->object_list, list) {
+            if (object->shared_memory) {
+                kfree(object->shared_memory);
+            }
+            list_del(&object->list);
+            kfree(object);
+        }
+        /* Delete container */
+        list_del(&container->list);
+        kfree(container);
+    }
+
     misc_deregister(&memory_container_dev);
 }
