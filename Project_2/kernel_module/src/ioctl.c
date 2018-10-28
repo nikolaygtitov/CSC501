@@ -320,7 +320,6 @@ static void delete_object(struct container *container, struct object *object)
  */
 int memory_container_mmap(struct file *filp, struct vm_area_struct *vma)
 {
-    int rc = 0;
     struct task *task = NULL;
     struct object *object = NULL;
     //struct vm_area_struct kernel_vma;
@@ -341,7 +340,7 @@ int memory_container_mmap(struct file *filp, struct vm_area_struct *vma)
     if (!task) {
         ERROR("No such running task with PID: %d is found in existing containers.\n", current->pid);
         mutex_unlock(&c_lock);
-        return ESRCH;
+        return -ESRCH;
     }
     DEBUG("Found task: %d\n", current->pid);
     
@@ -355,7 +354,7 @@ int memory_container_mmap(struct file *filp, struct vm_area_struct *vma)
         if (!object) {
             ERROR("Unable to create object OID: %lu in the container CID: %llu -> PID: %d due to memory allocation issues.\n", vma->vm_pgoff, task->container->cid, task->pid);
             mutex_unlock(&c_lock);
-            return ENOMEM;
+            return -ENOMEM;
         }
     }
     DEBUG("Found object: %llu\n", object->oid);
@@ -368,25 +367,22 @@ int memory_container_mmap(struct file *filp, struct vm_area_struct *vma)
         if (!object) {
             ERROR("Unable to set object fields of object OID: %lu in the container CID: %llu -> PID: %d due to memory allocation issues.\n", vma->vm_pgoff, task->container->cid, task->pid);
             mutex_unlock(&c_lock);
-            return ENOMEM;
+            return -ENOMEM;
         }
         DEBUG("Object fields are set: %llu\n", object->oid);
     } else {
         /* Object was already allocated - make sure the size isn't different */
         if (object->size != (vma->vm_end - vma->vm_start)) {
-            return EINVAL;
+            return -EINVAL;
         }
     }
     DEBUG("Ready to call remap_pfn_range(): %llu\n", object->oid);
     
     /* Remap kernel memory into the user-space */
-    down_write(&vma->vm_mm->mmap_sem);
-    rc = remap_pfn_range(vma, vma->vm_start, object->pfn, object->size, vma->vm_page_prot);
-    up_write(&vma->vm_mm->mmap_sem);
-    if (rc) {
+    if (remap_pfn_range(vma, vma->vm_start, object->pfn, object->size, vma->vm_page_prot) != 0) {
         ERROR("Failed: Unable to remap kernel memory into the user space; CID: %llu -> PID: %d -> OID: %llu.\n", task->container->cid, task->pid, object->oid);
         mutex_unlock(&c_lock);
-        return EADDRNOTAVAIL;
+        return -EADDRNOTAVAIL;
     }
     
     DEBUG("Success: Request to remap kernel space memory into the user-space memory; CID: %llu -> PID: %d -> OID: %llu.\n", task->container->cid, task->pid, object->oid);
@@ -428,7 +424,7 @@ int memory_container_lock(struct memory_container_cmd __user *user_cmd)
     if (!task) {
         ERROR("No such running task with PID: %d is found in existing containers.\n", current->pid);
         mutex_unlock(&c_lock);
-        return ESRCH;
+        return -ESRCH;
     }
     
     /* Find an object for a given container and object id */
@@ -443,7 +439,7 @@ int memory_container_lock(struct memory_container_cmd __user *user_cmd)
         if (!object) {
             ERROR("Unable to create object OID: %llu in the container CID: %llu -> PID: %d due to memory allocation issues.\n", cmd.oid, task->container->cid, task->pid);
             mutex_unlock(&c_lock);
-            return ENOMEM;
+            return -ENOMEM;
         }
     }
 
@@ -498,7 +494,7 @@ int memory_container_unlock(struct memory_container_cmd __user *user_cmd)
     if (!task) {
         ERROR("No such running task with PID: %d is found in existing containers.\n", current->pid);
         mutex_unlock(&c_lock);
-        return ESRCH;
+        return -ESRCH;
     }
 
     /* Find an object for a given container and object id */
@@ -507,7 +503,7 @@ int memory_container_unlock(struct memory_container_cmd __user *user_cmd)
     if (!object) {
         ERROR("No such object OID: %llu in the container CID: %llu.\n", cmd.oid, task->container->cid);
         mutex_unlock(&c_lock);
-        return ESRCH;
+        return -ESRCH;
     }
     
     mutex_unlock(&object->lock);
@@ -545,7 +541,7 @@ int memory_container_delete(struct memory_container_cmd __user *user_cmd)
     if (!task) {
         ERROR("No such running task with PID: %d is found in existing containers.\n", current->pid);
         mutex_unlock(&c_lock);
-        return ESRCH;
+        return -ESRCH;
     }
 
     container = task->container;
@@ -595,7 +591,7 @@ int memory_container_create(struct memory_container_cmd __user *user_cmd)
         if (!container) {
             ERROR("Unable to create container %llu.\n", cmd.cid);
             mutex_unlock(&c_lock);
-            return ENOMEM;
+            return -ENOMEM;
         }
     }
 
@@ -604,7 +600,7 @@ int memory_container_create(struct memory_container_cmd __user *user_cmd)
     if (!task) {
         ERROR("Unable to create task %d.\n", current->pid);
         mutex_unlock(&c_lock);
-        return ENOMEM;
+        return -ENOMEM;
     }
 
     mutex_unlock(&c_lock);
@@ -651,7 +647,7 @@ int memory_container_free(struct memory_container_cmd __user *user_cmd)
     if (!task) {
         ERROR("No such running task with PID: %d is found in existing containers.\n", current->pid);
         mutex_unlock(&c_lock);
-        return ESRCH;
+        return -ESRCH;
     }
 
     /* Find an object for a given container and object id */
@@ -661,7 +657,7 @@ int memory_container_free(struct memory_container_cmd __user *user_cmd)
         /* Could not find object in the list for a given container - cannot remove the object */
         ERROR("Unable to find object, OID: %llu in the container, CID: %llu; Will not remove object.\n", cmd.oid, task->container->cid);
         mutex_unlock(&c_lock);
-        return ENXIO;
+        return -ENXIO;
     }
     
     DEBUG("Object is found in the container, CID: %llu -> OID: %llu. Attempt to free it shared memory...\n", task->container->cid, object->oid);
