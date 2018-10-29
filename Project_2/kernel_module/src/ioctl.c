@@ -48,7 +48,8 @@
 #include <linux/kthread.h>
 
 #define PCONTAINER_IOCTL_DEBUG _IOWR('N', 0x50, struct memory_container_cmd)
-#define DEBUG(format, ...) printk(KERN_DEBUG "[pid:%d][csc501:%s:%d]: " format, current->pid, __func__, __LINE__, __VA_ARGS__)
+#define DEBUG(format, ...)
+//#define DEBUG(format, ...) printk(KERN_DEBUG "[pid:%d][csc501:%s:%d]: " format, current->pid, __func__, __LINE__, __VA_ARGS__)
 #define ERROR(format, ...) printk(KERN_ERR "[pid:%d][csc501:%s:%d]: " format, current->pid, __func__, __LINE__, __VA_ARGS__)
 
 struct container {
