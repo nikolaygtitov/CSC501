@@ -175,7 +175,9 @@ static struct container * create_container(__u64 cid)
 }
 
 /*
- * Delete a container if it doesn't have any tasks or objects
+ * Delete a container.
+ *
+ * Deletes a container if it does not have any tasks and objects.
  */
 static void delete_container(struct container *container)
 {
@@ -225,7 +227,10 @@ static struct task * create_task(struct container *container, struct task_struct
 /**
  * Create a VMM area memory object.
  *
- * Allocates object and assigns the object id.
+ * Allocates object and assigns oid to the object id.
+ * Initializes all its fields with the default values and assigns its shared
+ * memory to NULL value to indicate that shared memory has not been allocated
+ * yet.
  * Initializes mutex lock and object list head.
  * Inserts the object into VMM area memory list of the resource memory
  * container.
@@ -241,7 +246,7 @@ static struct object * create_object(struct container *container, __u64 oid)
         return NULL;
     }
 
-    /* Set object fields */
+    /* Set object fields to default values */
     object->oid = oid;
     object->size = 0;
     object->shared_memory = NULL;
@@ -264,8 +269,8 @@ static struct object * create_object(struct container *container, __u64 oid)
 /**
  * Set object fields.
  *
- * Allocates shared memory. Sets all of the objects fields based on the given
- * VMM memory area.
+ * Allocates shared memory.
+ * Sets all of the objects fields based on the given VMM memory area.
  * Maps virtual address to a physical.
  * If allocation of shared memory fails, returns NULL.
  */
@@ -284,7 +289,7 @@ static struct object * set_object_fields(struct object *object, struct vm_area_s
 
 /* Delete an object from the container and free it.
  *
- * Deletes from the container and frees an object.
+ * Deletes an object from the given container and frees it.
  * If corresponding container does not have anymore tasks and objects, removes
  * and frees the container.
  */
@@ -308,11 +313,11 @@ static void delete_object(struct container *container, struct object *object)
  * with an offset was already created/requested since the kernel module is
  * loaded, the mmap request should assign the address of the previously
  * allocated object to the mmap request.
- * Finds a task based on pid by iterating through all containers and all the
- * tasks within each container. If the task is not found returns corresponding
- * error.
+ * Finds a task based on pid by invoking get_task() function.
+ * If the task is not found returns corresponding error.
  * Finds an object based on the found task, its corresponding container, and
- * given object id. If object is not found, it has not been created yet.
+ * given object id by invoking get_object() function.
+ * If object is not found, it has not been created yet.
  * Creates an object based on the given VMM memory area struct and sets all
  * the object fields with the given VMM memory area struct attributes.
  * Object fields are only set if there is no shared memory allocated for the
@@ -323,17 +328,8 @@ int memory_container_mmap(struct file *filp, struct vm_area_struct *vma)
 {
     struct task *task = NULL;
     struct object *object = NULL;
-    //struct vm_area_struct kernel_vma;
 
     DEBUG("Called mmap, pid:%d.\n", current->pid);
-
-    /* Copy user data to kernel */
-/*
-    if (copy_from_user(&kernel_vma, (void *) vma, sizeof(struct vm_area_struct))) {
-        ERROR("Copy from user of the vma failure on PID: %d.\n", current->pid);
-        return -EFAULT;
-    }
-*/
 
     mutex_lock(&c_lock);
     DEBUG("Locked: %s\n", "c_lock");
@@ -392,16 +388,20 @@ int memory_container_mmap(struct file *filp, struct vm_area_struct *vma)
 }
 
 /*
- * Mutex Lock.
+ * Mutex lock.
  *
- * Finds a task based on pid by iterating through all containers and all the
- * tasks within each container. If the task is not found returns corresponding
- * error.
+ * Finds a task based on the current pid by invoking get_task() function.
+ * If the task is not found returns corresponding error.
  * Finds an object based on the found task, its corresponding container, and
- * given object id. If object is not found, it has not been created yet.
- * Creates an object by creating a dummy VMM memory area struct and assigning
- * its offset to the object id. After object is created free dummy VMM memory
- * area. Object is only created if it does not exist.
+ * given object id by invoking get_object() function.
+ * If object is not found, it has not been created yet.
+ * Creates an object and assigns object id to the given vmm offset by invoking
+ * create_object() function. Object gets created only if it does not exist.
+ * Prior locking the object, increments reference counter to indicate that the
+ * object is in use by this task. Hence, object does not get deleted while it
+ * has been referenced by any task.
+ * After the object is locked, it decrements reference counter to indicate that
+ * the object is no longer in use by this task.
  * Locks the object.
  */
 int memory_container_lock(struct memory_container_cmd __user *user_cmd)
@@ -444,15 +444,15 @@ int memory_container_lock(struct memory_container_cmd __user *user_cmd)
         }
     }
 
-    /* Increment so object isn't deleted while we are waiting */
+    /* Increment reference counter to indicate the object is in use by this task, hence object does not get deleted while it has been referenced by any task */
     ++object->waiting_threads;
 
     mutex_unlock(&c_lock);
 
-    /* Threads will sleep here, but with waiting_threads positive, so the object will not be deleted */
+    /* Threads will sleep here, but with waiting_threads or reference counter being positive it cannot be deleted */
     mutex_lock(&object->lock);
 
-    /* Decrement waiting_threads */
+    /* Decrement reference counter to indicate that the object is no longer in use by this task */
     mutex_lock(&c_lock);
     --object->waiting_threads;
     mutex_unlock(&c_lock);
@@ -461,20 +461,21 @@ int memory_container_lock(struct memory_container_cmd __user *user_cmd)
 }
 
 /*
- * Mutex Unlock.
+ * Mutex unlock.
  *
- * Finds a task based on pid by iterating through all containers and all the
- * tasks within each container. If the task is not found, returns
- * corresponding error.
+ * Finds a task based on pid by invoking get_task() function.
+ * If the task is not found returns corresponding error.
  * Finds an object based on the current task, its corresponding container, and
- * given object id. If the object is not found returns corresponding error.
+ * given object id  by invoking get_object() function.
+ * If the object is not found returns corresponding error.
  * Unlocks the object.
- * Checks whether shared memory of the object is freed, then there was an
- * attempt to delete this object, but the object was locked and delete was
- * unsuccessful.
- * Deletes this object from the container and frees it if its shared memory is
- * freed. If corresponding container does not have anymore tasks and objects,
- * removes the container.
+ * Checks whether shared memory of the object is freed and reference counter is
+ * zero indicating there are no current tasks referencing the object, then
+ * there was an attempt to delete the object that must be completed. Since the
+ * object was locked or referenced by other task(s) at the delete attempt, it
+ * did not succeed.
+ * If object's shared memory is freed and no other task(s) reference it,
+ * complete the delete() operation by invoking delete_object() function.
  */
 int memory_container_unlock(struct memory_container_cmd __user *user_cmd)
 {
@@ -509,7 +510,7 @@ int memory_container_unlock(struct memory_container_cmd __user *user_cmd)
     
     mutex_unlock(&object->lock);
     
-    /* Delete the object from the container if it was attempted to be deleted */
+    /* Delete the object from the container if it was attempted to be deleted and there are no current task(s) referencing it */
     if (!object->shared_memory && object->waiting_threads == 0) {
         DEBUG("Shared memory of the object is freed: CID: %llu -> OID: %llu. Attempt to delete and free an object...\n", task->container->cid, object->oid);
         delete_object(task->container, object);
@@ -522,12 +523,11 @@ int memory_container_unlock(struct memory_container_cmd __user *user_cmd)
 /**
  * Delete the task from the container.
  *
- * Finds a task based on pid by iterating through all containers and all the
- * tasks within each container. If the task is not found, returns corresponding
- * error.
- * Deletes the task from the container.
- * Deletes and frees container only if container does not have anymore tasks and
- * objects in it.
+ * Finds a task based on pid by invoking get_task() function.
+ * If the task is not found, returns corresponding error.
+ * Deletes and frees the task from the container.
+ * Deletes and frees container only if container does not have anymore tasks
+ * and objects in it by invoking delete_container().
  */
 int memory_container_delete(struct memory_container_cmd __user *user_cmd)
 {
@@ -563,8 +563,7 @@ int memory_container_delete(struct memory_container_cmd __user *user_cmd)
 /**
  * Create a task in the corresponding container.
  *
- * Checks if container already exists. If it does not exist, creates new
- * container.
+ * Checks if container already exists. If it does not exist, creates a new one.
  * Creates new task. Inserts new task into the task list of the container.
  */
 int memory_container_create(struct memory_container_cmd __user *user_cmd)
@@ -612,20 +611,20 @@ int memory_container_create(struct memory_container_cmd __user *user_cmd)
 /**
  * Free an object from memory container.
  *
- * Finds a task based on pid by iterating through all containers and all the
- * tasks within each container. If the task is not found returns corresponding
- * error.
+ * Finds a task based on pid by invoking get_task() function.
+ * If the task is not found returns corresponding error.
  * Finds an object based on the current task, its corresponding container, and
- * given object id. If the object is not found returns corresponding error.
+ * given object id by invoking get_object() function.
+ * If the object is not found returns corresponding error.
  * Frees shared memory of the object, but does not delete the object yet since
  * it can be locked.
- * Checks whether an object is locked, then does not delete it from the
- * container and does not free it.
- * memory_container_unlock() function will complete deletion of the object when
- * it is unlocked.
- * Otherwise, deletes this object from the container and frees it.
- * If corresponding container does not have anymore tasks and objects, removes
- * the container.
+ * Checks whether the object is locked and if there are any task(s) referencing
+ * it, then does not delete it from the container and does not free it.
+ * The  memory_container_unlock() function will complete the delete operation
+ * once object is unlocked and it is confirmed that there are no other task(s)
+ * referencing the object.
+ * Otherwise, deletes this object from the container and frees it by invoking
+ * delete_object() function.
  */
 int memory_container_free(struct memory_container_cmd __user *user_cmd)
 {
@@ -667,7 +666,7 @@ int memory_container_free(struct memory_container_cmd __user *user_cmd)
     kfree(object->shared_memory);
     object->shared_memory = NULL;
     
-    /* Check if object is locked, otherwise delete and free the object from the container */
+    /* Check if object is locked and if there are any task(s) referencing it, otherwise delete and free the object from the container */
     if (!mutex_is_locked(&object->lock) && object->waiting_threads == 0) {
         DEBUG("Object is not locked: CID: %llu -> OID: %llu. Attempt to delete and free an object ...\n", task->container->cid, object->oid);
         delete_object(task->container, object);

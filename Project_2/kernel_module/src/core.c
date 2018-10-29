@@ -98,7 +98,7 @@ int memory_container_init(void)
  */ 
 void memory_container_exit(void)
 {
-    /* Free resources */
+    /* Free all resources */
     struct container *container, *ncontainer = NULL;
     struct task *task, *ntask = NULL;
     struct object *object, *nobject = NULL;
