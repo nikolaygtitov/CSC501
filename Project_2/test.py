@@ -4,10 +4,11 @@ import subprocess
 import random
 import time
 
-POWER_OF_MAX_NUMBER_OF_OBJECTS = 8
-POWER_OF_MAX_SIZE_OF_OBJECTS = 11
-MAX_NUMBER_OF_TASKS = 9
-MAX_NUMBER_OF_CONTAINERS = 9
+POWER_OF_MAX_NUMBER_OF_OBJECTS = 14
+POWER_OF_MAX_SIZE_OF_OBJECTS = 14
+MAX_FLOOR_NUMBER_OF_TASKS = 5
+MAX_CEILING_NUMBER_OF_TASKS = 9
+'''MAX_NUMBER_OF_CONTAINERS = 9'''
 
 
 class Tester:
@@ -38,9 +39,15 @@ class Tester:
     def test_variations(self):
         for num_of_objects in range(POWER_OF_MAX_NUMBER_OF_OBJECTS):
             for size_of_objects in range(1, POWER_OF_MAX_SIZE_OF_OBJECTS):
-                for tasks in range(1, MAX_NUMBER_OF_TASKS):
-                    for containers in range(1, MAX_NUMBER_OF_CONTAINERS):
-                        self.run_test(2**num_of_objects, 2**size_of_objects, 2**tasks, 2**containers)
+                if num_of_objects > 128:
+                    for tasks in range(1, MAX_FLOOR_NUMBER_OF_TASKS):
+                        for containers in range(1, MAX_FLOOR_NUMBER_OF_TASKS):
+                            self.run_test(2**num_of_objects, 2**size_of_objects, 2**tasks, 2**containers)
+                else:
+                    for tasks in range(1, MAX_CEILING_NUMBER_OF_TASKS):
+                        for containers in range(1, MAX_CEILING_NUMBER_OF_TASKS):
+                            if tasks >= 16 and containers >= 16:
+                                self.run_test(2**num_of_objects, 2**size_of_objects, 2**tasks, 2**containers)
         print('Success!!!')
 
     def test_loop(self, objects, size, tasks, containers, iterations=100):
