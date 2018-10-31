@@ -39,15 +39,16 @@ class Tester:
     def test_variations(self):
         for num_of_objects in range(POWER_OF_MAX_NUMBER_OF_OBJECTS):
             for size_of_objects in range(1, POWER_OF_MAX_SIZE_OF_OBJECTS):
-                if num_of_objects > 128:
-                    for tasks in range(1, MAX_FLOOR_NUMBER_OF_TASKS):
-                        for containers in range(1, MAX_FLOOR_NUMBER_OF_TASKS):
+                if num_of_objects < MAX_CEILING_NUMBER_OF_TASKS - 1:
+                    for tasks in range(MAX_CEILING_NUMBER_OF_TASKS):
+                        for containers in range(MAX_CEILING_NUMBER_OF_TASKS):
+                            '''print(str(2**num_of_objects) + '  ' + str(2**size_of_objects) + '  ' + str(2**tasks) + '  ' + str(2**containers))'''
                             self.run_test(2**num_of_objects, 2**size_of_objects, 2**tasks, 2**containers)
                 else:
-                    for tasks in range(1, MAX_CEILING_NUMBER_OF_TASKS):
-                        for containers in range(1, MAX_CEILING_NUMBER_OF_TASKS):
-                            if tasks >= 16 and containers >= 16:
-                                self.run_test(2**num_of_objects, 2**size_of_objects, 2**tasks, 2**containers)
+                    for tasks in range(3, MAX_FLOOR_NUMBER_OF_TASKS):
+                        for containers in range(3, MAX_FLOOR_NUMBER_OF_TASKS):
+                            '''print(str(2**num_of_objects) + '  ' + str(2**size_of_objects) + '  ' + str(2**tasks) + '  ' + str(2**containers))'''
+                            self.run_test(2**num_of_objects, 2**size_of_objects, 2**tasks, 2**containers)
         print('Success!!!')
 
     def test_loop(self, objects, size, tasks, containers, iterations=100):
